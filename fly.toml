@@ -1,0 +1,35 @@
+# fly.toml - Fly.io 배포 설정
+app = "rag-chatbot-kim"
+primary_region = "nrt"  # 도쿄 (한국에서 가장 가까움)
+
+[build]
+
+[env]
+  DOCUMENTS_DIR = "/data/documents"
+  CHROMA_DIR = "/data/chroma_db"
+  CHUNK_SIZE = "500"
+  CHUNK_OVERLAP = "50"
+  TOP_K = "5"
+  MODEL = "llama-3.3-70b-versatile"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type = "requests"
+    hard_limit = 25
+    soft_limit = 20
+
+[[vm]]
+  memory = "1gb"
+  cpu_kind = "shared"
+  cpus = 1
+
+[[mounts]]
+  source = "rag_data"
+  destination = "/data"
+  initial_size = "3gb"
