@@ -112,10 +112,18 @@ async def auth_status():
 # ── 기본 라우트 ───────────────────────────────────────────────────────────────
 @app.get("/", response_class=HTMLResponse)
 async def root():
-    html_file = Path("frontend/index.html")
+    html_file = Path("frontend/service.html")
     if html_file.exists():
         return HTMLResponse(html_file.read_text(encoding="utf-8"))
     return HTMLResponse("<h1>RAG Chatbot</h1>")
+
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_page():
+    html_file = Path("frontend/admin.html")
+    if html_file.exists():
+        return HTMLResponse(html_file.read_text(encoding="utf-8"))
+    return HTMLResponse("<h1>Admin</h1>")
 
 
 # ── 문서 업로드 ───────────────────────────────────────────────────────────────
