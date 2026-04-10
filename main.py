@@ -161,6 +161,15 @@ async def delete_document(filename: str):
     return {"message": f"{filename} 삭제 완료"}
 
 
+@app.delete("/api/documents")
+async def delete_all_documents():
+    docs = vector_store.list_documents()
+    for d in docs:
+        vector_store.delete_document(d["filename"])
+        (DOCUMENTS_DIR / d["filename"]).unlink(missing_ok=True)
+    return {"message": f"{len(docs)}개 문서 전체 삭제 완료"}
+
+
 # ── 채팅 ──────────────────────────────────────────────────────────────────────
 @app.post("/api/chat")
 async def chat(request: ChatRequest):
@@ -193,6 +202,12 @@ async def drive_sync(request: DriveSyncRequest, background_tasks: BackgroundTask
 async def drive_status():
     from google_drive import get_status
     return get_status()
+
+
+@app.get("/api/drive/config")
+async def drive_config():
+    from google_drive import load_drive_url
+    return {"url": load_drive_url()}
 
 
 # ── 이미지 질문 ───────────────────────────────────────────────────────────────

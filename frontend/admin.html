@@ -45,18 +45,6 @@
     .admin-btn:hover { opacity: .85; }
     .admin-msg { font-size: 11px; color: #276749; margin-top: 4px; min-height: 16px; }
 
-    /* 업로드 */
-    .upload-area { margin: 14px; border: 2px dashed var(--border); border-radius: var(--radius); padding: 16px 12px; text-align: center; cursor: pointer; transition: border-color .2s, background .2s; }
-    .upload-area:hover, .upload-area.drag { border-color: var(--primary); background: #eef2ff; }
-    .upload-area .icon { font-size: 26px; }
-    .upload-area p { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
-    .upload-area span { font-size: 11px; color: var(--text-muted); }
-    .upload-btn { display: inline-block; margin-top: 6px; padding: 5px 12px; background: var(--primary); color: #fff; border-radius: 6px; font-size: 12px; cursor: pointer; }
-    #file-input { display: none; }
-    #upload-progress { margin: 0 14px 10px; display: none; }
-    .progress-bar-wrap { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
-    .progress-bar { height: 100%; background: var(--primary); width: 0%; transition: width .3s; }
-    .progress-label { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
 
     /* Drive */
     .drive-section { margin: 0 14px 10px; border: 1px solid #c6f6d5; border-radius: var(--radius); background: #f0fff4; overflow: hidden; }
@@ -72,6 +60,16 @@
     .drive-status { margin-top: 6px; font-size: 11px; color: #276749; min-height: 16px; }
     .drive-progress-wrap { height: 5px; background: #c6f6d5; border-radius: 3px; overflow: hidden; margin-top: 6px; display: none; }
     .drive-progress-bar { height: 100%; background: #38a169; width: 0%; transition: width .4s; }
+    .drive-file-list { margin-top: 8px; max-height: 140px; overflow-y: auto; display: none; }
+    .drive-file-item { display: flex; align-items: center; gap: 6px; padding: 3px 0; font-size: 11px; color: #2d3748; border-bottom: 1px solid #c6f6d5; }
+    .drive-file-item:last-child { border-bottom: none; }
+    .drive-file-item .fi-icon { flex-shrink: 0; }
+    .drive-file-item .fi-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .drive-file-item.done .fi-icon::before { content: '✓'; color: #38a169; font-weight: 700; }
+    .drive-file-item.error .fi-icon::before { content: '✕'; color: #e53e3e; font-weight: 700; }
+    .drive-file-item.processing .fi-icon::before { content: '⟳'; color: #d97706; font-weight: 700; }
+    .drive-file-item.skipped .fi-icon::before { content: '–'; color: #a0aec0; font-weight: 700; }
+    .drive-file-item.skipped .fi-name { color: #a0aec0; }
 
     /* 문서 목록 */
     .doc-section { flex: 1; overflow-y: auto; padding: 0 14px 14px; }
@@ -168,19 +166,6 @@
     <div class="admin-msg" id="admin-msg"></div>
   </div>
 
-  <!-- 문서 업로드 -->
-  <div class="upload-area" id="drop-zone" onclick="document.getElementById('file-input').click()">
-    <div class="icon">📄</div>
-    <p>파일을 드래그하거나</p>
-    <div class="upload-btn">파일 선택</div>
-    <span>PDF, DOCX, HWP, TXT, MD 지원</span>
-    <input type="file" id="file-input" accept=".pdf,.docx,.doc,.hwp,.hwpx,.txt,.md,.markdown" multiple />
-  </div>
-  <div id="upload-progress">
-    <div class="progress-bar-wrap"><div class="progress-bar" id="prog-bar"></div></div>
-    <div class="progress-label" id="prog-label"></div>
-  </div>
-
   <!-- Google Drive -->
   <div class="drive-section">
     <div class="drive-header" id="drive-toggle" onclick="toggleDrive()">
@@ -192,12 +177,16 @@
       <button class="drive-sync-btn" id="drive-btn" onclick="syncDrive()">동기화 시작</button>
       <div class="drive-progress-wrap" id="drive-prog-wrap"><div class="drive-progress-bar" id="drive-prog-bar"></div></div>
       <div class="drive-status" id="drive-status"></div>
+      <div class="drive-file-list" id="drive-file-list"></div>
     </div>
   </div>
 
   <!-- 문서 목록 -->
   <div class="doc-section">
-    <h2>인덱싱된 문서</h2>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+      <h2 style="margin:0">인덱싱된 문서</h2>
+      <button onclick="clearAllDocs()" style="font-size:11px;padding:3px 8px;border:1px solid #fc8181;border-radius:5px;background:#fff5f5;color:#c53030;cursor:pointer;">전체 삭제</button>
+    </div>
     <div id="doc-list"><div class="empty-docs">문서 없음</div></div>
   </div>
 </aside>
@@ -246,6 +235,7 @@
       _adminPw = pw;
       document.getElementById('login-screen').classList.add('hidden');
       loadDocs();
+      loadDriveConfig();
     } catch { errEl.textContent = '서버 오류.'; }
   }
   document.getElementById('login-pw').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
@@ -305,55 +295,67 @@
     toast(`${filename} 삭제됨`, 'success'); loadDocs();
   }
 
-  async function uploadFiles(files) {
-    const prog = document.getElementById('upload-progress');
-    const bar = document.getElementById('prog-bar');
-    const label = document.getElementById('prog-label');
-    prog.style.display = 'block';
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      label.textContent = `업로드 중: ${file.name} (${i+1}/${files.length})`;
-      bar.style.width = `${(i/files.length)*100}%`;
-      const fd = new FormData(); fd.append('file', file);
-      try {
-        const res = await fetch(`${API}/api/upload`, { method: 'POST', body: fd });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail);
-        toast(`${file.name}: ${data.chunks}청크 인덱싱`, 'success');
-      } catch (e) { toast(`${file.name}: ${e.message}`, 'error'); }
-    }
-    bar.style.width = '100%'; label.textContent = '완료!';
-    setTimeout(() => { prog.style.display = 'none'; bar.style.width = '0'; }, 1500);
-    loadDocs();
+  async function clearAllDocs() {
+    if (!confirm('인덱싱된 문서를 모두 삭제할까요?')) return;
+    await fetch(`${API}/api/documents`, { method: 'DELETE' });
+    toast('전체 문서 삭제됨', 'success'); loadDocs();
   }
 
-  document.getElementById('file-input').addEventListener('change', e => { if (e.target.files.length) uploadFiles(Array.from(e.target.files)); });
-  const dz = document.getElementById('drop-zone');
-  dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag'); });
-  dz.addEventListener('dragleave', () => dz.classList.remove('drag'));
-  dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('drag'); if (e.dataTransfer.files.length) uploadFiles(Array.from(e.dataTransfer.files)); });
+  async function loadDriveConfig() {
+    try {
+      const res = await fetch(`${API}/api/drive/config`);
+      const data = await res.json();
+      if (data.url) {
+        document.getElementById('drive-url').value = data.url;
+        document.getElementById('drive-toggle').classList.add('open');
+        document.getElementById('drive-body').classList.add('open');
+        document.getElementById('drive-status').textContent = '저장된 Drive 주소 로드됨';
+      }
+    } catch {}
+  }
 
   function toggleDrive() {
     document.getElementById('drive-toggle').classList.toggle('open');
     document.getElementById('drive-body').classList.toggle('open');
   }
+
+  function updateDriveFileList(files_detail) {
+    const el = document.getElementById('drive-file-list');
+    if (!files_detail || files_detail.length === 0) { el.style.display = 'none'; return; }
+    el.style.display = 'block';
+    el.innerHTML = files_detail.map(f => `
+      <div class="drive-file-item ${f.status}">
+        <span class="fi-icon"></span>
+        <span class="fi-name" title="${f.name}">${f.name}</span>
+      </div>`).join('');
+    el.scrollTop = el.scrollHeight;
+  }
+
   let drivePolling = null;
   async function syncDrive() {
     const url = document.getElementById('drive-url').value.trim();
     if (!url || !url.includes('drive.google.com')) { toast('올바른 Drive 링크를 입력하세요', 'error'); return; }
     const btn = document.getElementById('drive-btn'); btn.disabled = true;
     document.getElementById('drive-status').textContent = '동기화 시작 중...';
+    document.getElementById('drive-file-list').style.display = 'none';
+    document.getElementById('drive-file-list').innerHTML = '';
     const res = await fetch(`${API}/api/drive/sync`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
     if (!res.ok) { toast('동기화 요청 실패', 'error'); btn.disabled = false; return; }
     drivePolling = setInterval(async () => {
       const s = await (await fetch(`${API}/api/drive/status`)).json();
-      const pct = s.total > 0 ? Math.round((s.progress/s.total)*100) : (s.running ? 30 : 0);
-      document.getElementById('drive-status').textContent = s.message;
+      const pct = s.total > 0 ? Math.round((s.progress/s.total)*100) : (s.running ? 10 : 0);
+      document.getElementById('drive-status').textContent = s.message + (s.total > 0 ? ` (${s.progress}/${s.total})` : '');
       const wrap = document.getElementById('drive-prog-wrap');
       wrap.style.display = pct > 0 ? 'block' : 'none';
       document.getElementById('drive-prog-bar').style.width = pct + '%';
-      if (s.done) { clearInterval(drivePolling); btn.disabled = false; loadDocs(); toast(s.errors.length ? `완료 (${s.errors.length}개 오류)` : 'Drive 동기화 완료!', s.errors.length ? '' : 'success'); }
-    }, 1500);
+      updateDriveFileList(s.files_detail);
+      if (s.done) {
+        clearInterval(drivePolling);
+        btn.disabled = false;
+        loadDocs();
+        toast(s.errors.length ? `완료 (${s.errors.length}개 오류)` : 'Drive 동기화 완료!', s.errors.length ? '' : 'success');
+      }
+    }, 1200);
   }
 
   function addMessage(role, text = '') {

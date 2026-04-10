@@ -6,6 +6,7 @@ Google Drive 공유 링크에서 파일/폴더를 다운로드하고 자동 인�
   - 폴더: https://drive.google.com/drive/folders/FOLDER_ID?usp=...
   - 단축: https://drive.google.com/open?id=ID
 """
+import json
 import logging
 import re
 from pathlib import Path
@@ -24,7 +25,31 @@ _status: dict = {
     "errors": [],
     "done": False,
     "message": "대기 중",
+    "files_detail": [],  # [{"name": "...", "status": "done"|"error"|"processing"}]
 }
+
+
+# ── Drive URL 영구 저장 ───────────────────────────────────────────────────────
+def _config_path() -> Path:
+    from config import CHROMA_DIR
+    return CHROMA_DIR.parent / "drive_config.json"
+
+
+def save_drive_url(url: str):
+    try:
+        _config_path().write_text(json.dumps({"url": url}), encoding="utf-8")
+    except Exception as e:
+        logger.warning(f"Drive URL 저장 실패: {e}")
+
+
+def load_drive_url() -> str:
+    try:
+        p = _config_path()
+        if p.exists():
+            return json.loads(p.read_text(encoding="utf-8")).get("url", "")
+    except Exception as e:
+        logger.warning(f"Drive URL 로드 실패: {e}")
+    return ""
 
 
 def get_status() -> dict:
@@ -126,8 +151,9 @@ async def run_sync(share_url: str, documents_dir: Path, vector_store) -> None:
     if _status["running"]:
         return
 
+    save_drive_url(share_url)
     _set(running=True, progress=0, total=0, current="",
-         downloaded=[], errors=[], done=False, message="초기화 중...")
+         downloaded=[], errors=[], done=False, message="초기화 중...", files_detail=[])
 
     from config import GOOGLE_API_KEY
     if not GOOGLE_API_KEY:
@@ -176,13 +202,23 @@ async def _sync_file(file_id: str, dest: Path, vector_store, downloaded: list, e
         meta = resp.json()
         filename = meta["name"]
 
+        existing = {d["filename"] for d in vector_store.list_documents()}
+        if filename in existing:
+            _status["files_detail"].append({"name": filename, "status": "skipped"})
+            _set(progress=1, message=f"이미 인덱싱된 파일: {filename}")
+            return
+
+        _status["files_detail"].append({"name": filename, "status": "processing"})
         _set(current=filename)
         out_path = _download_file(file_id, filename, dest)
         downloaded.append(out_path.name)
+        _status["files_detail"][-1]["status"] = "done"
         _set(progress=1)
         _auto_index(str(out_path), vector_store, errors)
     except Exception as e:
         errors.append(f"파일 다운로드 오류: {e}")
+        if _status["files_detail"]:
+            _status["files_detail"][-1]["status"] = "error"
         logger.error(f"파일 다운로드 실패: {e}")
 
 
@@ -201,17 +237,29 @@ async def _sync_folder(folder_id: str, dest: Path, vector_store, downloaded: lis
         errors.append("폴더가 비어있거나 접근할 수 없습니다.")
         return
 
+    # 이미 인덱싱된 파일명 목록
+    existing = {d["filename"] for d in vector_store.list_documents()}
+
     _set(total=len(files))
     for i, f in enumerate(files):
         fname = f["name"]
-        _set(current=fname, message=f"다운로드 중: {fname}")
+        # 이미 인덱싱된 파일은 건너뜀
+        if fname in existing:
+            _status["files_detail"].append({"name": fname, "status": "skipped"})
+            _set(progress=i + 1, message=f"({i+1}/{len(files)}) 건너뜀: {fname}")
+            continue
+
+        _status["files_detail"].append({"name": fname, "status": "processing"})
+        _set(current=fname, message=f"({i+1}/{len(files)}) {fname}")
         try:
             out_path = _download_file(f["id"], fname, dest)
             downloaded.append(out_path.name)
+            _status["files_detail"][-1]["status"] = "done"
             _set(progress=i + 1)
             _auto_index(str(out_path), vector_store, errors)
         except Exception as e:
             errors.append(f"{fname} 다운로드 실패: {e}")
+            _status["files_detail"][-1]["status"] = "error"
             logger.error(f"{fname} 실패: {e}")
             _set(progress=i + 1)
 
