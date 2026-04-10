@@ -1,5 +1,5 @@
 # fly.toml - Fly.io 배포 설정
-app = "rag-chatbot-kim"
+app = "bae-ai-chat"
 primary_region = "nrt"  # 도쿄 (한국에서 가장 가까움)
 
 [build]
