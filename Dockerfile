@@ -11,6 +11,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# pyhwp 설치 (hwp5txt 명령어 포함)
+RUN pip install --no-cache-dir pyhwp
+
 # sentence-transformers 모델 미리 다운로드 (빌드 시 캐시)
 RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
 
