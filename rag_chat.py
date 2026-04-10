@@ -1,4 +1,5 @@
 import base64
+import concurrent.futures
 import hashlib
 import json
 import logging
@@ -60,15 +61,14 @@ question_cache = QuestionCache()
 
 # ── 질문 분해 ─────────────────────────────────────────────────────────────────
 def _decompose_question(question: str) -> list[str]:
-    """복잡한 질문을 하위 질문들로 분해합니다."""
-    # 짧고 단순한 질문은 분해하지 않음
-    if len(question) < 40:
+    """복잡한 질문을 하위 질문들로 분해합니다. 짧은 질문은 즉시 반환."""
+    if len(question) < 50:
         return [question]
 
     try:
         resp = client.chat.completions.create(
-            model=MODEL,
-            max_tokens=200,
+            model="llama-3.1-8b-instant",  # 빠른 소형 모델 사용
+            max_tokens=150,
             messages=[{
                 "role": "user",
                 "content": (
@@ -155,13 +155,22 @@ def chat_stream(question: str, vector_store) -> Iterator[str]:
         yield "data: [DONE]\n\n"
         return
 
-    # 2. 질문 분해
-    sub_questions = _decompose_question(question)
+    # 2. 질문 분해 + 벡터 검색 병렬 실행
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
+        decompose_future = ex.submit(_decompose_question, question)
+        base_search_future = ex.submit(vector_store.search, question, TOP_K)
+
+        sub_questions = decompose_future.result()
+        base_results = base_search_future.result()
+
     if len(sub_questions) > 1:
         yield f"data: {json.dumps({'type': 'decomposed', 'questions': sub_questions})}\n\n"
 
-    # 3. 벡터 검색
-    results = _search_merged(question, sub_questions, vector_store)
+    # 3. 추가 하위 질문 검색 (기본 검색 결과와 병합)
+    if len(sub_questions) > 1:
+        results = _search_merged(question, sub_questions, vector_store)
+    else:
+        results = base_results
     if not results:
         yield f"data: {json.dumps({'type': 'text', 'content': '관련 문서를 찾을 수 없습니다. 먼저 문서를 업로드해주세요.'})}\n\n"
         yield "data: [DONE]\n\n"
