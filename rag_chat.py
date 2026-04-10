@@ -12,7 +12,7 @@ from config import GROQ_API_KEY, MODEL, TOP_K
 
 logger = logging.getLogger(__name__)
 
-client = Groq(api_key=GROQ_API_KEY)
+groq_client = Groq(api_key=GROQ_API_KEY)
 
 VISION_MODEL = "llama-3.2-11b-vision-preview"
 
@@ -69,7 +69,7 @@ def _decompose_question(question: str) -> list[str]:
     if len(question) < 50:
         return [question]
     try:
-        resp = client.chat.completions.create(
+        resp = groq_client.chat.completions.create(
             model="llama-3.1-8b-instant",
             max_tokens=150,
             messages=[{
@@ -92,7 +92,7 @@ def _decompose_question(question: str) -> list[str]:
 # ── 이미지 질문 추출 ──────────────────────────────────────────────────────────
 def image_to_question(image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
     b64 = base64.b64encode(image_bytes).decode()
-    resp = client.chat.completions.create(
+    resp = groq_client.chat.completions.create(
         model=VISION_MODEL,
         max_tokens=500,
         messages=[{
@@ -172,7 +172,7 @@ def chat_stream(question: str, vector_store) -> Iterator[str]:
 
         full_answer = ""
         try:
-            stream = client.chat.completions.create(
+            stream = groq_client.chat.completions.create(
                 model=MODEL, max_tokens=2048, stream=True,
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT},
@@ -180,10 +180,10 @@ def chat_stream(question: str, vector_store) -> Iterator[str]:
                 ]
             )
             for chunk in stream:
-                delta = chunk.choices[0].delta
-                if delta.content:
-                    full_answer += delta.content
-                    yield f"data: {json.dumps({'type': 'text', 'content': delta.content})}\n\n"
+                text = chunk.choices[0].delta.content
+                if text:
+                    full_answer += text
+                    yield f"data: {json.dumps({'type': 'text', 'content': text})}\n\n"
         except Exception as e:
             yield f"data: {json.dumps({'type': 'error', 'content': f'AI 오류: {str(e)}'})}\n\n"
 
@@ -217,7 +217,7 @@ def chat_stream(question: str, vector_store) -> Iterator[str]:
 
         sub_text = ""
         try:
-            stream = client.chat.completions.create(
+            stream = groq_client.chat.completions.create(
                 model=MODEL, max_tokens=600, stream=True,
                 messages=[
                     {"role": "system", "content": SUB_SYSTEM_PROMPT},
@@ -225,10 +225,10 @@ def chat_stream(question: str, vector_store) -> Iterator[str]:
                 ]
             )
             for chunk in stream:
-                delta = chunk.choices[0].delta
-                if delta.content:
-                    sub_text += delta.content
-                    yield f"data: {json.dumps({'type': 'sub_text', 'index': i, 'content': delta.content})}\n\n"
+                text = chunk.choices[0].delta.content
+                if text:
+                    sub_text += text
+                    yield f"data: {json.dumps({'type': 'sub_text', 'index': i, 'content': text})}\n\n"
         except Exception as e:
             err = f"오류: {e}"
             yield f"data: {json.dumps({'type': 'sub_text', 'index': i, 'content': err})}\n\n"
@@ -247,7 +247,7 @@ def chat_stream(question: str, vector_store) -> Iterator[str]:
     combined_input = "\n\n".join(sub_answers)
     full_answer = ""
     try:
-        stream = client.chat.completions.create(
+        stream = groq_client.chat.completions.create(
             model=MODEL, max_tokens=1500, stream=True,
             messages=[
                 {"role": "system", "content": COMBINE_SYSTEM_PROMPT},
@@ -259,10 +259,10 @@ def chat_stream(question: str, vector_store) -> Iterator[str]:
             ]
         )
         for chunk in stream:
-            delta = chunk.choices[0].delta
-            if delta.content:
-                full_answer += delta.content
-                yield f"data: {json.dumps({'type': 'text', 'content': delta.content})}\n\n"
+            text = chunk.choices[0].delta.content
+            if text:
+                full_answer += text
+                yield f"data: {json.dumps({'type': 'text', 'content': text})}\n\n"
     except Exception as e:
         yield f"data: {json.dumps({'type': 'error', 'content': f'통합 오류: {str(e)}'})}\n\n"
 
