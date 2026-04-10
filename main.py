@@ -118,7 +118,7 @@ async def root():
     return HTMLResponse("<h1>RAG Chatbot</h1>")
 
 
-@app.get("/admin", response_class=HTMLResponse)
+@app.get("/06c5e027db9162c9", response_class=HTMLResponse)
 async def admin_page():
     html_file = Path("frontend/admin.html")
     if html_file.exists():
