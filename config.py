@@ -6,6 +6,8 @@ load_dotenv()
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
+ACCESS_PASSWORD = os.getenv("ACCESS_PASSWORD", "chatbot2024")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "20220405")
 DOCUMENTS_DIR = Path(os.getenv("DOCUMENTS_DIR", "./documents"))
 CHROMA_DIR = Path(os.getenv("CHROMA_DIR", "./chroma_db"))
 COLLECTION_NAME = "documents"

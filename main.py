@@ -4,14 +4,14 @@ import shutil
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import BackgroundTasks, FastAPI, File, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
-from config import DOCUMENTS_DIR, MODEL
+from config import ACCESS_PASSWORD, ADMIN_PASSWORD, DOCUMENTS_DIR, MODEL
 from document_processor import SUPPORTED_EXTENSIONS, process_document
-from rag_chat import chat_stream
+from rag_chat import chat_stream, image_to_question, question_cache
 from vector_store import vector_store
 
 logging.basicConfig(
@@ -60,6 +60,53 @@ class ChatRequest(BaseModel):
 
 class DriveSyncRequest(BaseModel):
     url: str
+
+
+class AuthRequest(BaseModel):
+    password: str
+
+
+class NewPasswordRequest(BaseModel):
+    admin_password: str
+    new_password: str
+
+
+# 서비스 잠금 상태
+_service_locked = False
+
+
+# ── 인증 ─────────────────────────────────────────────────────────────────────
+@app.post("/api/auth/login")
+async def login(req: AuthRequest):
+    global _service_locked, ACCESS_PASSWORD
+    if _service_locked:
+        raise HTTPException(423, "서비스가 잠겨 있습니다. 관리자에게 문의하세요.")
+    if req.password == ADMIN_PASSWORD:
+        return {"role": "admin"}
+    if req.password == ACCESS_PASSWORD:
+        return {"role": "user"}
+    raise HTTPException(401, "비밀번호가 올바르지 않습니다.")
+
+
+@app.post("/api/auth/admin")
+async def admin_action(req: NewPasswordRequest):
+    global _service_locked, ACCESS_PASSWORD
+    if req.admin_password != ADMIN_PASSWORD:
+        raise HTTPException(403, "관리자 비밀번호가 올바르지 않습니다.")
+    if req.new_password == "LOCK":
+        _service_locked = True
+        return {"message": "서비스가 잠겼습니다."}
+    if req.new_password == "UNLOCK":
+        _service_locked = False
+        return {"message": "서비스가 열렸습니다."}
+    ACCESS_PASSWORD = req.new_password
+    _service_locked = False
+    return {"message": "비밀번호가 변경되었습니다."}
+
+
+@app.get("/api/auth/status")
+async def auth_status():
+    return {"locked": _service_locked}
 
 
 # ── 기본 라우트 ───────────────────────────────────────────────────────────────
@@ -140,7 +187,53 @@ async def drive_status():
     return get_status()
 
 
+# ── 이미지 질문 ───────────────────────────────────────────────────────────────
+@app.post("/api/chat/image")
+async def chat_image(
+    file: UploadFile = File(...),
+    extra: str = Form(default=""),
+):
+    allowed = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+    if file.content_type not in allowed:
+        raise HTTPException(400, f"지원하지 않는 이미지 형식: {file.content_type}")
+
+    image_bytes = await file.read()
+    try:
+        extracted = image_to_question(image_bytes, file.content_type)
+    except Exception as e:
+        raise HTTPException(500, f"이미지 분석 실패: {e}")
+
+    question = f"{extracted}\n{extra}".strip() if extra.strip() else extracted
+
+    return StreamingResponse(
+        chat_stream(question, vector_store),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "X-Extracted-Question": question[:200],
+        },
+    )
+
+
+# ── 캐시 상태 ─────────────────────────────────────────────────────────────────
+@app.get("/api/cache/stats")
+async def cache_stats():
+    return {"cached_questions": question_cache.size()}
+
+
+@app.delete("/api/cache")
+async def clear_cache():
+    question_cache._cache.clear()
+    return {"message": "캐시 초기화 완료"}
+
+
 # ── 헬스체크 ──────────────────────────────────────────────────────────────────
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "model": MODEL, "total_chunks": vector_store.count()}
+    return {
+        "status": "ok",
+        "model": MODEL,
+        "total_chunks": vector_store.count(),
+        "cached_questions": question_cache.size(),
+    }
