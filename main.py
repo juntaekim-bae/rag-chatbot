@@ -21,27 +21,31 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+import threading
+_processing_lock = threading.Lock()  # 동시 처리 방지
+
+
 def _index_existing_documents():
     """이미 ChromaDB에 없는 문서만 백그라운드에서 인덱싱합니다."""
-    import threading
     def _run():
-        existing = {d["filename"] for d in vector_store.list_documents()}
-        pending = [
-            fp for fp in DOCUMENTS_DIR.iterdir()
-            if fp.is_file()
-            and fp.suffix.lower() in SUPPORTED_EXTENSIONS
-            and fp.name not in existing
-        ]
-        if not pending:
-            logger.info(f"모든 문서 이미 인덱싱됨 (총 {vector_store.count()}개 청크)")
-            return
-        logger.info(f"미인덱싱 문서 {len(pending)}개 인덱싱 시작 (백그라운드)...")
-        for fp in pending:
-            try:
-                process_document(fp, vector_store)
-            except Exception as e:
-                logger.error(f"{fp.name} 인덱싱 실패: {e}")
-        logger.info(f"인덱싱 완료 — 총 {vector_store.count()}개 청크")
+        with _processing_lock:
+            existing = {d["filename"] for d in vector_store.list_documents()}
+            pending = [
+                fp for fp in DOCUMENTS_DIR.iterdir()
+                if fp.is_file()
+                and fp.suffix.lower() in SUPPORTED_EXTENSIONS
+                and fp.name not in existing
+            ]
+            if not pending:
+                logger.info(f"모든 문서 이미 인덱싱됨 (총 {vector_store.count()}개 청크)")
+                return
+            logger.info(f"미인덱싱 문서 {len(pending)}개 인덱싱 시작 (백그라운드)...")
+            for fp in pending:
+                try:
+                    process_document(fp, vector_store)
+                except Exception as e:
+                    logger.error(f"{fp.name} 인덱싱 실패: {e}")
+            logger.info(f"인덱싱 완료 — 총 {vector_store.count()}개 청크")
     threading.Thread(target=_run, daemon=True).start()
 
 

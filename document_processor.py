@@ -11,9 +11,17 @@ SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".doc", ".txt", ".md", ".markdown", ".h
 
 
 
+_PDF_SIZE_LIMIT = 8 * 1024 * 1024  # 8MB 이상은 pdfplumber 스킵
+
+
 def read_pdf(filepath: Path) -> str:
-    """pdfplumber로 페이지별 추출, 타임아웃 보장"""
+    """pdfplumber(소형 PDF)로 페이지별 추출, 대용량은 pypdf 직접 사용"""
     import subprocess, sys, json
+
+    file_size = filepath.stat().st_size
+    if file_size > _PDF_SIZE_LIMIT:
+        logger.info(f"{filepath.name}: 대용량({file_size//1024//1024}MB), pypdf 직접 사용")
+        return _read_pdf_pypdf(filepath)
 
     script = r"""
 import sys, json, warnings, signal
@@ -31,7 +39,7 @@ try:
         total = len(pdf.pages)
         for i, page in enumerate(pdf.pages):
             signal.signal(signal.SIGALRM, handler)
-            signal.alarm(10)  # 페이지당 10초
+            signal.alarm(5)  # 페이지당 5초
             try:
                 parts = []
                 t = (page.extract_text() or '').strip()
@@ -58,7 +66,7 @@ except Exception as e:
     try:
         result = subprocess.run(
             [sys.executable, "-c", script, str(filepath)],
-            capture_output=True, text=True, timeout=180
+            capture_output=True, text=True, timeout=90
         )
         if result.returncode == 0 and result.stdout.strip():
             data = json.loads(result.stdout.strip())
@@ -67,18 +75,24 @@ except Exception as e:
                 logger.info(f"{filepath.name}: {len(text)}자 ({data.get('pages',0)}페이지)")
                 return text
     except subprocess.TimeoutExpired:
-        logger.warning(f"{filepath.name}: PDF 추출 전체 타임아웃")
+        logger.warning(f"{filepath.name}: pdfplumber 타임아웃, pypdf fallback")
     except Exception as e:
-        logger.warning(f"{filepath.name}: PDF 추출 오류 ({e})")
+        logger.warning(f"{filepath.name}: pdfplumber 오류 ({e}), pypdf fallback")
 
-    # 최후 수단: pypdf 직접 시도
+    return _read_pdf_pypdf(filepath)
+
+
+def _read_pdf_pypdf(filepath: Path) -> str:
     try:
         from pypdf import PdfReader
         import warnings as w; w.filterwarnings("ignore")
         reader = PdfReader(str(filepath))
         pages = [p.extract_text() or "" for p in reader.pages]
-        return "\n\n".join(t.strip() for t in pages if t.strip())
-    except Exception:
+        text = "\n\n".join(t.strip() for t in pages if t.strip())
+        logger.info(f"{filepath.name}: pypdf {len(text)}자 ({len(reader.pages)}페이지)")
+        return text
+    except Exception as e:
+        logger.error(f"{filepath.name}: pypdf 오류 ({e})")
         return ""
 
 

@@ -267,6 +267,7 @@ async def _sync_folder(folder_id: str, dest: Path, vector_store, downloaded: lis
 # ── 자동 인덱싱 ───────────────────────────────────────────────────────────────
 def _auto_index(file_path: str, vector_store, errors: list):
     from document_processor import SUPPORTED_EXTENSIONS, process_document
+    from main import _processing_lock
 
     fp = Path(file_path)
 
@@ -278,7 +279,8 @@ def _auto_index(file_path: str, vector_store, errors: list):
         logger.info(f"인덱싱 제외 (미지원 형식): {fp.name}")
         return
     try:
-        count = process_document(fp, vector_store)
+        with _processing_lock:
+            count = process_document(fp, vector_store)
         logger.info(f"인덱싱 완료: {fp.name} ({count}개 청크)")
     except Exception as e:
         errors.append(f"인덱싱 실패 {fp.name}: {e}")
