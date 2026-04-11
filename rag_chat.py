@@ -3,6 +3,7 @@ import concurrent.futures
 import hashlib
 import json
 import logging
+import re
 import time
 from typing import Iterator, Optional
 
@@ -19,13 +20,16 @@ VISION_MODEL = "llama-3.2-11b-vision-preview"
 SYSTEM_PROMPT = """당신은 제공된 문서를 기반으로 질문에 답변하는 AI 어시스턴트입니다.
 
 규칙:
-1. 반드시 제공된 문서 컨텍스트에 근거하여 답변하세요.
-2. 문서에 없는 내용은 "해당 내용은 문서에 없습니다"라고 명확히 말하세요.
+1. 문서에 직접적인 내용이 없더라도, 관련된 개념이나 유사한 내용이 있으면 그것을 바탕으로 답변하세요.
+2. 문서에 전혀 관련 내용이 없을 때만 "문서에서 찾을 수 없습니다"라고 하세요.
 3. 답변은 명확하고 구조적으로 작성하세요.
-4. 질문 언어에 맞춰 답변하세요 (한국어 질문 → 한국어 답변)."""
+4. 한국어로 질문하면 한국어로 답변하세요.
+5. 문서 내용을 최대한 활용하여 풍부하게 답변하세요."""
 
-SUB_SYSTEM_PROMPT = """당신은 제공된 문서를 기반으로 하위 질문에 간결하게 답변하는 AI 어시스턴트입니다.
-3~5문장 이내로 핵심만 답변하세요. 문서에 없으면 "문서에 없음"이라고만 하세요."""
+SUB_SYSTEM_PROMPT = """당신은 제공된 문서를 기반으로 하위 질문에 답변하는 AI 어시스턴트입니다.
+핵심 내용을 3~5문장으로 답변하세요.
+직접적인 내용이 없어도 관련 내용이 있으면 활용하세요.
+정말 아무 관련도 없을 때만 "관련 내용 없음"이라고 하세요."""
 
 COMBINE_SYSTEM_PROMPT = """당신은 여러 하위 답변을 통합하여 최종 답변을 작성하는 AI 어시스턴트입니다.
 하위 답변들을 자연스럽게 통합하여 완성도 높은 답변을 작성하세요.
@@ -66,12 +70,13 @@ question_cache = QuestionCache()
 
 # ── 질문 분해 ─────────────────────────────────────────────────────────────────
 def _decompose_question(question: str) -> list[str]:
-    if len(question) < 50:
+    # 80자 미만은 단순 질문으로 분해 안 함
+    if len(question) < 80:
         return [question]
     try:
         resp = groq_client.chat.completions.create(
             model="llama-3.1-8b-instant",
-            max_tokens=150,
+            max_tokens=200,
             messages=[{
                 "role": "user",
                 "content": (
@@ -112,7 +117,20 @@ def image_to_question(image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
 
 
 # ── 유틸 ─────────────────────────────────────────────────────────────────────
+def _dedup_results(results: list) -> list:
+    """거의 동일한 청크 제거 (앞 100자 기준)"""
+    seen = set()
+    deduped = []
+    for r in results:
+        key = re.sub(r'\s+', '', r["content"][:100])
+        if key not in seen:
+            seen.add(key)
+            deduped.append(r)
+    return deduped
+
+
 def _build_context(results: list) -> tuple[str, list[str]]:
+    results = _dedup_results(results)
     sources: list[str] = []
     parts: list[str] = []
     for r in results:
@@ -121,26 +139,6 @@ def _build_context(results: list) -> tuple[str, list[str]]:
             sources.append(fname)
         parts.append(f"[출처: {fname}]\n{r['content']}")
     return "\n\n---\n\n".join(parts), sources
-
-
-def _answer_sub(sub_q: str, vector_store) -> tuple[str, str, list[str]]:
-    """하위 질문 1개에 대해 검색 + 답변 생성 (스트리밍 없이 완성 답변 반환)."""
-    results = vector_store.search(sub_q, n_results=TOP_K)
-    if not results:
-        return sub_q, "관련 문서를 찾을 수 없습니다.", []
-    context, sources = _build_context(results)
-    try:
-        resp = client.chat.completions.create(
-            model=MODEL,
-            max_tokens=600,
-            messages=[
-                {"role": "system", "content": SUB_SYSTEM_PROMPT},
-                {"role": "user", "content": f"=== 문서 ===\n{context}\n\n=== 질문 ===\n{sub_q}"}
-            ]
-        )
-        return sub_q, resp.choices[0].message.content.strip(), sources
-    except Exception as e:
-        return sub_q, f"오류: {e}", []
 
 
 # ── 메인 스트림 ───────────────────────────────────────────────────────────────
@@ -160,7 +158,7 @@ def chat_stream(question: str, vector_store) -> Iterator[str]:
         sub_questions = f_decompose.result()
         base_results = f_search.result()
 
-    # 3. 단일 질문이면 기존 방식으로 빠르게 처리
+    # 3. 단일 질문이면 빠르게 처리
     if len(sub_questions) <= 1:
         if not base_results:
             yield f"data: {json.dumps({'type': 'text', 'content': '관련 문서를 찾을 수 없습니다. 먼저 문서를 업로드해주세요.'})}\n\n"
@@ -192,14 +190,13 @@ def chat_stream(question: str, vector_store) -> Iterator[str]:
         yield "data: [DONE]\n\n"
         return
 
-    # 4. 복합 질문: 분해된 질문들을 순차적으로 답변 스트리밍
+    # 4. 복합 질문: 분해된 질문들 순차 스트리밍
     yield f"data: {json.dumps({'type': 'decomposed', 'questions': sub_questions})}\n\n"
 
     all_sources: list[str] = []
     sub_answers: list[str] = []
 
     for i, sq in enumerate(sub_questions):
-        # 하위 질문 시작 알림
         yield f"data: {json.dumps({'type': 'sub_start', 'index': i, 'question': sq, 'total': len(sub_questions)})}\n\n"
 
         results = vector_store.search(sq, n_results=TOP_K)
@@ -237,11 +234,9 @@ def chat_stream(question: str, vector_store) -> Iterator[str]:
         sub_answers.append(f"Q: {sq}\nA: {sub_text}")
         yield f"data: {json.dumps({'type': 'sub_end', 'index': i})}\n\n"
 
-    # 5. 출처 전송
     if all_sources:
         yield f"data: {json.dumps({'type': 'sources', 'sources': all_sources})}\n\n"
 
-    # 6. 최종 통합 답변 스트리밍
     yield f"data: {json.dumps({'type': 'final_start'})}\n\n"
 
     combined_input = "\n\n".join(sub_answers)
@@ -266,7 +261,6 @@ def chat_stream(question: str, vector_store) -> Iterator[str]:
     except Exception as e:
         yield f"data: {json.dumps({'type': 'error', 'content': f'통합 오류: {str(e)}'})}\n\n"
 
-    # 7. 캐시 저장
     if full_answer:
         question_cache.set(question, full_answer)
 

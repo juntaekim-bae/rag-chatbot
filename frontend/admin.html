@@ -57,19 +57,36 @@
     .drive-body input { width: 100%; padding: 7px 10px; border: 1px solid #9ae6b4; border-radius: 8px; font-size: 12px; outline: none; background: #fff; margin-bottom: 8px; }
     .drive-sync-btn { width: 100%; padding: 8px; background: #38a169; color: #fff; border: none; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; }
     .drive-sync-btn:disabled { opacity: .5; cursor: not-allowed; }
-    .drive-status { margin-top: 6px; font-size: 11px; color: #276749; min-height: 16px; }
-    .drive-progress-wrap { height: 5px; background: #c6f6d5; border-radius: 3px; overflow: hidden; margin-top: 6px; display: none; }
-    .drive-progress-bar { height: 100%; background: #38a169; width: 0%; transition: width .4s; }
-    .drive-file-list { margin-top: 8px; max-height: 140px; overflow-y: auto; display: none; }
-    .drive-file-item { display: flex; align-items: center; gap: 6px; padding: 3px 0; font-size: 11px; color: #2d3748; border-bottom: 1px solid #c6f6d5; }
-    .drive-file-item:last-child { border-bottom: none; }
-    .drive-file-item .fi-icon { flex-shrink: 0; }
-    .drive-file-item .fi-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .drive-file-item.done .fi-icon::before { content: '✓'; color: #38a169; font-weight: 700; }
-    .drive-file-item.error .fi-icon::before { content: '✕'; color: #e53e3e; font-weight: 700; }
-    .drive-file-item.processing .fi-icon::before { content: '⟳'; color: #d97706; font-weight: 700; }
-    .drive-file-item.skipped .fi-icon::before { content: '–'; color: #a0aec0; font-weight: 700; }
-    .drive-file-item.skipped .fi-name { color: #a0aec0; }
+    /* Drive 기본 */
+    .drive-status-text { margin-top: 4px; font-size: 11px; color: #276749; min-height: 14px; }
+
+    /* 동기화 진행 패널 */
+    .sync-panel { margin: 0 14px 10px; background: #f0fff4; border: 1px solid #9ae6b4; border-radius: var(--radius); overflow: hidden; display: none; }
+    .sync-panel.active { display: block; }
+    .sync-panel-header { display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: #276749; color: #fff; }
+    .sync-panel-header .spin { display: inline-block; animation: spin 1s linear infinite; font-size: 14px; }
+    .sync-panel-header .sync-title { font-size: 13px; font-weight: 700; flex: 1; }
+    .sync-panel-header .sync-pct { font-size: 13px; font-weight: 700; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .sync-progress-wrap { height: 6px; background: #c6f6d5; }
+    .sync-progress-bar { height: 100%; background: #38a169; width: 0%; transition: width .5s; }
+    .sync-stats { display: flex; gap: 0; border-bottom: 1px solid #c6f6d5; }
+    .sync-stat { flex: 1; text-align: center; padding: 7px 4px; border-right: 1px solid #c6f6d5; }
+    .sync-stat:last-child { border-right: none; }
+    .sync-stat .sv { font-size: 16px; font-weight: 700; color: #276749; }
+    .sync-stat .sl { font-size: 10px; color: #718096; margin-top: 1px; }
+    .sync-current { padding: 7px 12px; font-size: 11px; color: #2d3748; background: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-bottom: 1px solid #c6f6d5; min-height: 30px; }
+    .sync-file-list { max-height: 160px; overflow-y: auto; }
+    .sync-file-item { display: flex; align-items: center; gap: 6px; padding: 4px 12px; font-size: 11px; border-bottom: 1px solid #e6ffed; }
+    .sync-file-item:last-child { border-bottom: none; }
+    .sync-file-item .fi-icon { width: 14px; text-align: center; flex-shrink: 0; font-style: normal; }
+    .sync-file-item .fi-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #2d3748; }
+    .sync-file-item.done .fi-icon { color: #38a169; }
+    .sync-file-item.error .fi-icon { color: #e53e3e; }
+    .sync-file-item.processing .fi-icon { color: #d97706; animation: spin 1s linear infinite; display: inline-block; }
+    .sync-file-item.skipped .fi-icon { color: #a0aec0; }
+    .sync-file-item.skipped .fi-name { color: #a0aec0; }
+    .sync-elapsed { padding: 5px 12px; font-size: 10px; color: #718096; text-align: right; background: #f9fff9; }
 
     /* 문서 목록 */
     .doc-section { flex: 1; overflow-y: auto; padding: 0 14px 14px; }
@@ -175,10 +192,27 @@
     <div class="drive-body" id="drive-body">
       <input type="text" id="drive-url" placeholder="Google Drive 링크" />
       <button class="drive-sync-btn" id="drive-btn" onclick="syncDrive()">동기화 시작</button>
-      <div class="drive-progress-wrap" id="drive-prog-wrap"><div class="drive-progress-bar" id="drive-prog-bar"></div></div>
-      <div class="drive-status" id="drive-status"></div>
-      <div class="drive-file-list" id="drive-file-list"></div>
+      <div class="drive-status-text" id="drive-status"></div>
     </div>
+  </div>
+
+  <!-- 동기화 진행 패널 -->
+  <div class="sync-panel" id="sync-panel">
+    <div class="sync-panel-header">
+      <span class="spin">⟳</span>
+      <span class="sync-title" id="sync-title">Drive 동기화 중...</span>
+      <span class="sync-pct" id="sync-pct">0%</span>
+    </div>
+    <div class="sync-progress-wrap"><div class="sync-progress-bar" id="sync-bar"></div></div>
+    <div class="sync-stats">
+      <div class="sync-stat"><div class="sv" id="stat-done">0</div><div class="sl">완료</div></div>
+      <div class="sync-stat"><div class="sv" id="stat-skip">0</div><div class="sl">건너뜀</div></div>
+      <div class="sync-stat"><div class="sv" id="stat-err">0</div><div class="sl">오류</div></div>
+      <div class="sync-stat"><div class="sv" id="stat-total">-</div><div class="sl">전체</div></div>
+    </div>
+    <div class="sync-current" id="sync-current">파일 목록 가져오는 중...</div>
+    <div class="sync-file-list" id="sync-file-list"></div>
+    <div class="sync-elapsed" id="sync-elapsed"></div>
   </div>
 
   <!-- 문서 목록 -->
@@ -292,13 +326,15 @@
   async function deleteDoc(filename) {
     if (!confirm(`"${filename}" 삭제?`)) return;
     await fetch(`${API}/api/documents/${encodeURIComponent(filename)}`, { method: 'DELETE' });
-    toast(`${filename} 삭제됨`, 'success'); loadDocs();
+    toast(`${filename} 삭제됨`, 'success');
+    await loadDocs();
   }
 
   async function clearAllDocs() {
     if (!confirm('인덱싱된 문서를 모두 삭제할까요?')) return;
     await fetch(`${API}/api/documents`, { method: 'DELETE' });
-    toast('전체 문서 삭제됨', 'success'); loadDocs();
+    toast('전체 문서 삭제됨', 'success');
+    await loadDocs();
   }
 
   async function loadDriveConfig() {
@@ -319,43 +355,97 @@
     document.getElementById('drive-body').classList.toggle('open');
   }
 
-  function updateDriveFileList(files_detail) {
-    const el = document.getElementById('drive-file-list');
-    if (!files_detail || files_detail.length === 0) { el.style.display = 'none'; return; }
-    el.style.display = 'block';
-    el.innerHTML = files_detail.map(f => `
-      <div class="drive-file-item ${f.status}">
-        <span class="fi-icon"></span>
-        <span class="fi-name" title="${f.name}">${f.name}</span>
-      </div>`).join('');
-    el.scrollTop = el.scrollHeight;
+  const ICON = { done: '✓', error: '✕', processing: '⟳', skipped: '–' };
+
+  function updateSyncPanel(s, elapsed) {
+    const pct = s.total > 0 ? Math.round((s.progress / s.total) * 100) : (s.running ? 5 : 0);
+    const done = (s.files_detail || []).filter(f => f.status === 'done').length;
+    const skip = (s.files_detail || []).filter(f => f.status === 'skipped').length;
+    const err  = (s.files_detail || []).filter(f => f.status === 'error').length;
+
+    document.getElementById('sync-pct').textContent = pct + '%';
+    document.getElementById('sync-bar').style.width = pct + '%';
+    document.getElementById('stat-done').textContent = done;
+    document.getElementById('stat-skip').textContent = skip;
+    document.getElementById('stat-err').textContent = err;
+    document.getElementById('stat-total').textContent = s.total || '-';
+    document.getElementById('sync-current').textContent = s.message || '처리 중...';
+    document.getElementById('sync-elapsed').textContent = elapsed ? `경과 시간: ${elapsed}` : '';
+
+    if (s.done) {
+      document.getElementById('sync-title').textContent = `동기화 완료 — ${done}개 추가, ${skip}개 건너뜀`;
+      document.querySelector('.sync-panel-header').style.background = err > 0 ? '#c05621' : '#276749';
+      document.querySelector('.spin').style.display = 'none';
+    }
+
+    const list = document.getElementById('sync-file-list');
+    if (s.files_detail && s.files_detail.length > 0) {
+      list.innerHTML = [...s.files_detail].reverse().map(f => `
+        <div class="sync-file-item ${f.status}">
+          <i class="fi-icon">${ICON[f.status] || '?'}</i>
+          <span class="fi-name" title="${f.name}">${f.name}</span>
+        </div>`).join('');
+    }
   }
 
   let drivePolling = null;
+  let syncStartTime = null;
+
+  function fmtElapsed(ms) {
+    const s = Math.floor(ms / 1000);
+    if (s < 60) return `${s}초`;
+    return `${Math.floor(s/60)}분 ${s%60}초`;
+  }
+
   async function syncDrive() {
     const url = document.getElementById('drive-url').value.trim();
     if (!url || !url.includes('drive.google.com')) { toast('올바른 Drive 링크를 입력하세요', 'error'); return; }
     const btn = document.getElementById('drive-btn'); btn.disabled = true;
-    document.getElementById('drive-status').textContent = '동기화 시작 중...';
-    document.getElementById('drive-file-list').style.display = 'none';
-    document.getElementById('drive-file-list').innerHTML = '';
-    const res = await fetch(`${API}/api/drive/sync`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
-    if (!res.ok) { toast('동기화 요청 실패', 'error'); btn.disabled = false; return; }
+    document.getElementById('drive-status').textContent = '동기화 진행 중...';
+
+    // 패널 초기화 & 표시
+    syncStartTime = Date.now();
+    const panel = document.getElementById('sync-panel');
+    panel.classList.add('active');
+    document.getElementById('sync-title').textContent = 'Drive 동기화 중...';
+    document.getElementById('sync-pct').textContent = '0%';
+    document.getElementById('sync-bar').style.width = '0%';
+    document.getElementById('stat-done').textContent = '0';
+    document.getElementById('stat-skip').textContent = '0';
+    document.getElementById('stat-err').textContent = '0';
+    document.getElementById('stat-total').textContent = '-';
+    document.getElementById('sync-current').textContent = '파일 목록 가져오는 중...';
+    document.getElementById('sync-file-list').innerHTML = '';
+    document.getElementById('sync-elapsed').textContent = '';
+    document.querySelector('.sync-panel-header').style.background = '#276749';
+    document.querySelector('.spin').style.display = '';
+
+    const res = await fetch(`${API}/api/drive/sync`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url })
+    });
+    if (!res.ok) {
+      toast('동기화 요청 실패', 'error');
+      btn.disabled = false;
+      panel.classList.remove('active');
+      document.getElementById('drive-status').textContent = '';
+      return;
+    }
+
     drivePolling = setInterval(async () => {
-      const s = await (await fetch(`${API}/api/drive/status`)).json();
-      const pct = s.total > 0 ? Math.round((s.progress/s.total)*100) : (s.running ? 10 : 0);
-      document.getElementById('drive-status').textContent = s.message + (s.total > 0 ? ` (${s.progress}/${s.total})` : '');
-      const wrap = document.getElementById('drive-prog-wrap');
-      wrap.style.display = pct > 0 ? 'block' : 'none';
-      document.getElementById('drive-prog-bar').style.width = pct + '%';
-      updateDriveFileList(s.files_detail);
-      if (s.done) {
-        clearInterval(drivePolling);
-        btn.disabled = false;
-        loadDocs();
-        toast(s.errors.length ? `완료 (${s.errors.length}개 오류)` : 'Drive 동기화 완료!', s.errors.length ? '' : 'success');
-      }
-    }, 1200);
+      try {
+        const s = await (await fetch(`${API}/api/drive/status`)).json();
+        const elapsed = fmtElapsed(Date.now() - syncStartTime);
+        updateSyncPanel(s, elapsed);
+        if (s.done) {
+          clearInterval(drivePolling);
+          btn.disabled = false;
+          document.getElementById('drive-status').textContent = s.message;
+          await loadDocs();
+          toast(s.errors.length ? `완료 (${s.errors.length}개 오류)` : 'Drive 동기화 완료!', s.errors.length ? '' : 'success');
+        }
+      } catch {}
+    }, 1000);
   }
 
   function addMessage(role, text = '') {

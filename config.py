@@ -11,9 +11,9 @@ ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "20220405")
 DOCUMENTS_DIR = Path(os.getenv("DOCUMENTS_DIR", "./documents"))
 CHROMA_DIR = Path(os.getenv("CHROMA_DIR", "./chroma_db"))
 COLLECTION_NAME = "documents"
-CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "500"))
-CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "50"))
-TOP_K = int(os.getenv("TOP_K", "5"))
+CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "800"))
+CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "150"))
+TOP_K = int(os.getenv("TOP_K", "8"))
 MODEL = os.getenv("MODEL", "llama-3.3-70b-versatile")
 
 DOCUMENTS_DIR.mkdir(exist_ok=True)

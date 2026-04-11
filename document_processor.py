@@ -1,5 +1,6 @@
 import hashlib
 import logging
+import re
 from pathlib import Path
 
 from config import CHUNK_OVERLAP, CHUNK_SIZE
@@ -9,16 +10,76 @@ logger = logging.getLogger(__name__)
 SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".doc", ".txt", ".md", ".markdown", ".hwp", ".hwpx"}
 
 
-def read_pdf(filepath: Path) -> str:
-    from pypdf import PdfReader
 
-    reader = PdfReader(str(filepath))
-    pages = []
-    for page in reader.pages:
-        text = page.extract_text()
-        if text:
-            pages.append(text)
-    return "\n".join(pages)
+def read_pdf(filepath: Path) -> str:
+    """pdfplumber로 페이지별 추출, 타임아웃 보장"""
+    import subprocess, sys, json
+
+    script = r"""
+import sys, json, warnings, signal
+warnings.filterwarnings('ignore')
+
+def handler(signum, frame):
+    raise TimeoutError()
+
+filepath = sys.argv[1]
+results = []
+
+try:
+    import pdfplumber
+    with pdfplumber.open(filepath) as pdf:
+        total = len(pdf.pages)
+        for i, page in enumerate(pdf.pages):
+            signal.signal(signal.SIGALRM, handler)
+            signal.alarm(10)  # 페이지당 10초
+            try:
+                parts = []
+                t = (page.extract_text() or '').strip()
+                if t:
+                    parts.append(t)
+                try:
+                    for table in page.extract_tables():
+                        rows = [' | '.join(str(c).strip() for c in row if c and str(c).strip()) for row in table]
+                        rows = [r for r in rows if r]
+                        if rows:
+                            parts.append('\n'.join(rows))
+                except:
+                    pass
+                if parts:
+                    results.append('\n'.join(parts))
+            except TimeoutError:
+                pass
+            finally:
+                signal.alarm(0)
+    print(json.dumps({'text': '\n\n'.join(results), 'pages': total}))
+except Exception as e:
+    print(json.dumps({'text': '', 'pages': 1, 'error': str(e)}))
+"""
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", script, str(filepath)],
+            capture_output=True, text=True, timeout=180
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            data = json.loads(result.stdout.strip())
+            text = data.get("text", "")
+            if text.strip():
+                logger.info(f"{filepath.name}: {len(text)}자 ({data.get('pages',0)}페이지)")
+                return text
+    except subprocess.TimeoutExpired:
+        logger.warning(f"{filepath.name}: PDF 추출 전체 타임아웃")
+    except Exception as e:
+        logger.warning(f"{filepath.name}: PDF 추출 오류 ({e})")
+
+    # 최후 수단: pypdf 직접 시도
+    try:
+        from pypdf import PdfReader
+        import warnings as w; w.filterwarnings("ignore")
+        reader = PdfReader(str(filepath))
+        pages = [p.extract_text() or "" for p in reader.pages]
+        return "\n\n".join(t.strip() for t in pages if t.strip())
+    except Exception:
+        return ""
 
 
 def read_docx(filepath: Path) -> str:
@@ -71,19 +132,56 @@ def read_document(filepath: Path) -> str:
     raise ValueError(f"지원하지 않는 파일 형식: {suffix}")
 
 
+def normalize_korean(text: str) -> str:
+    """공백 정규화"""
+    text = re.sub(r'[ \t]+', ' ', text)    # 연속 공백 → 단일 공백
+    text = re.sub(r'\n{3,}', '\n\n', text)  # 과도한 줄바꿈 압축
+    return text.strip()
+
+
+def split_sentences(text: str) -> list[str]:
+    """한국어 문장 분리 — 문장 끝(다/요/까/죠/네 + 마침표/물음표/느낌표) 기준"""
+    # 문장 경계: 한국어 종결어미 뒤 마침표류, 또는 줄바꿈
+    pattern = r'(?<=[다요까죠네])[.!?]\s+|(?<=[.!?])\s+(?=[가-힣A-Z])'
+    parts = re.split(pattern, text)
+    sentences = []
+    for p in parts:
+        p = p.strip()
+        if p:
+            sentences.append(p)
+    return sentences if sentences else [text]
+
+
 def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> list[str]:
-    text = text.strip()
+    """문장 경계를 지키면서 청크 분할"""
+    text = normalize_korean(text)
+    sentences = split_sentences(text)
+
     chunks = []
-    start = 0
-    while start < len(text):
-        end = min(start + chunk_size, len(text))
-        chunk = text[start:end].strip()
-        if chunk:
-            chunks.append(chunk)
-        if end == len(text):
-            break
-        start = end - overlap
-    return chunks
+    current = ""
+
+    for sent in sentences:
+        # 현재 청크에 문장 추가 시 크기 초과
+        if current and len(current) + len(sent) + 1 > chunk_size:
+            chunks.append(current.strip())
+            # 오버랩: 현재 청크 끝부분을 다음 청크 시작으로
+            overlap_text = current[-overlap:] if len(current) > overlap else current
+            current = overlap_text + " " + sent
+        else:
+            current = (current + " " + sent).strip() if current else sent
+
+    if current.strip():
+        chunks.append(current.strip())
+
+    # 너무 짧은 청크는 다음과 합치기
+    merged = []
+    for c in chunks:
+        if merged and len(c) < 100:
+            merged[-1] += " " + c
+        else:
+            merged.append(c)
+
+    return merged if merged else [text]
 
 
 def process_document(filepath: Path, vector_store) -> int:
