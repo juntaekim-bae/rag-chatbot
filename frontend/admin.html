@@ -170,6 +170,12 @@
   <div class="sidebar-header">
     <h1>⚙️ 관리자 화면</h1>
     <p>문서 관리 · 서비스 설정</p>
+    <div style="margin-top:8px;background:rgba(255,255,255,.15);border-radius:8px;padding:6px 10px;display:flex;align-items:center;gap:8px;">
+      <span style="font-size:18px;">👥</span>
+      <span style="font-size:12px;">현재 접속자</span>
+      <span id="active-users" style="font-size:18px;font-weight:700;margin-left:auto;">-</span>
+      <span style="font-size:12px;">명</span>
+    </div>
   </div>
 
   <!-- 비밀번호/잠금 관리 -->
@@ -527,6 +533,16 @@
   document.getElementById('question').addEventListener('input', function () { this.style.height = 'auto'; this.style.height = Math.min(this.scrollHeight, 120) + 'px'; });
 
   setInterval(loadDocs, 30000);
+
+  async function loadActiveUsers() {
+    try {
+      const r = await fetch(`${API}/api/admin/stats`);
+      const d = await r.json();
+      document.getElementById('active-users').textContent = d.active_users ?? '-';
+    } catch {}
+  }
+  loadActiveUsers();
+  setInterval(loadActiveUsers, 15000);
 </script>
 </body>
 </html>

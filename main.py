@@ -1,10 +1,13 @@
 import asyncio
 import logging
+import secrets
 import shutil
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Optional
 
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
@@ -19,6 +22,35 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s — %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+# ── 세션 관리 ─────────────────────────────────────────────────────────────────
+_sessions: dict[str, dict] = {}  # token → {role, last_seen, version}
+_session_version: int = 0        # 비밀번호 변경 시 증가 → 기존 세션 전체 무효화
+
+def _create_token(role: str) -> str:
+    token = secrets.token_hex(32)
+    _sessions[token] = {"role": role, "last_seen": time.time(), "version": _session_version}
+    # 오래된 세션 정리 (1시간 이상)
+    cutoff = time.time() - 3600
+    dead = [t for t, s in _sessions.items() if s["last_seen"] < cutoff]
+    for t in dead:
+        del _sessions[t]
+    return token
+
+def _touch_token(token: str) -> Optional[str]:
+    """토큰 갱신 후 role 반환. 유효하지 않으면 None."""
+    s = _sessions.get(token)
+    if not s or s["version"] != _session_version:
+        return None
+    s["last_seen"] = time.time()
+    return s["role"]
+
+def _active_user_count() -> int:
+    cutoff = time.time() - 300  # 5분 이내 활동
+    return sum(
+        1 for s in _sessions.values()
+        if s["role"] == "user" and s["last_seen"] > cutoff and s["version"] == _session_version
+    )
 
 
 import threading
@@ -95,31 +127,50 @@ async def login(req: AuthRequest):
     if _service_locked:
         raise HTTPException(423, "서비스가 잠겨 있습니다. 관리자에게 문의하세요.")
     if req.password == ADMIN_PASSWORD:
-        return {"role": "admin"}
+        token = _create_token("admin")
+        return {"role": "admin", "token": token}
     if req.password == ACCESS_PASSWORD:
-        return {"role": "user"}
+        token = _create_token("user")
+        return {"role": "user", "token": token}
     raise HTTPException(401, "비밀번호가 올바르지 않습니다.")
 
 
 @app.post("/api/auth/admin")
 async def admin_action(req: NewPasswordRequest):
-    global _service_locked, ACCESS_PASSWORD
+    global _service_locked, ACCESS_PASSWORD, _session_version
     if req.admin_password != ADMIN_PASSWORD:
         raise HTTPException(403, "관리자 비밀번호가 올바르지 않습니다.")
     if req.new_password == "LOCK":
         _service_locked = True
+        _session_version += 1  # 모든 사용자 세션 무효화
         return {"message": "서비스가 잠겼습니다."}
     if req.new_password == "UNLOCK":
         _service_locked = False
         return {"message": "서비스가 열렸습니다."}
     ACCESS_PASSWORD = req.new_password
     _service_locked = False
+    _session_version += 1  # 모든 사용자 세션 무효화 (재로그인 필요)
     return {"message": "비밀번호가 변경되었습니다."}
 
 
 @app.get("/api/auth/status")
 async def auth_status():
-    return {"locked": _service_locked}
+    return {"locked": _service_locked, "session_version": _session_version}
+
+
+@app.post("/api/auth/heartbeat")
+async def heartbeat(authorization: Optional[str] = Header(default=None)):
+    """클라이언트가 30초마다 호출 — 세션 유지 및 유효성 확인"""
+    token = authorization.removeprefix("Bearer ").strip() if authorization else ""
+    role = _touch_token(token)
+    if not role:
+        raise HTTPException(401, "세션이 만료되었습니다.")
+    return {"ok": True, "session_version": _session_version}
+
+
+@app.get("/api/admin/stats")
+async def admin_stats():
+    return {"active_users": _active_user_count()}
 
 
 # ── 기본 라우트 ───────────────────────────────────────────────────────────────

@@ -120,6 +120,28 @@
 <script>
   const API = '';
   let isStreaming = false;
+  let _token = sessionStorage.getItem('chat_token') || '';
+  let _heartbeatTimer = null;
+
+  function showLogin(msg = '') {
+    _token = '';
+    sessionStorage.removeItem('chat_token');
+    if (_heartbeatTimer) { clearInterval(_heartbeatTimer); _heartbeatTimer = null; }
+    document.getElementById('login-screen').classList.remove('hidden');
+    if (msg) document.getElementById('login-error').textContent = msg;
+  }
+
+  function startHeartbeat() {
+    if (_heartbeatTimer) clearInterval(_heartbeatTimer);
+    _heartbeatTimer = setInterval(async () => {
+      try {
+        const r = await fetch(`${API}/api/auth/heartbeat`, {
+          method: 'POST', headers: { 'Authorization': `Bearer ${_token}` }
+        });
+        if (r.status === 401) showLogin('비밀번호가 변경되어 다시 로그인이 필요합니다.');
+      } catch {}
+    }, 30000);
+  }
 
   // ── 로그인 ──
   async function doLogin() {
@@ -134,18 +156,33 @@
       const data = await res.json();
       if (!res.ok) { errEl.textContent = data.detail || '비밀번호가 틀렸습니다.'; return; }
       if (data.role === 'admin') { errEl.textContent = '관리자는 /admin 페이지를 이용하세요.'; return; }
+      _token = data.token || '';
+      sessionStorage.setItem('chat_token', _token);
       document.getElementById('login-screen').classList.add('hidden');
       loadStat();
+      startHeartbeat();
     } catch { errEl.textContent = '서버 오류. 잠시 후 다시 시도하세요.'; }
   }
   document.getElementById('login-pw').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
 
-  // 잠금 상태 확인
-  fetch(`${API}/api/auth/status`).then(r => r.json()).then(d => {
-    if (d.locked) {
-      document.getElementById('login-error').textContent = '서비스가 잠겨 있습니다. 관리자에게 문의하세요.';
+  // 잠금 상태 확인 / 기존 토큰 자동 복구
+  (async () => {
+    try {
+      const d = await (await fetch(`${API}/api/auth/status`)).json();
+      if (d.locked) { document.getElementById('login-error').textContent = '서비스가 잠겨 있습니다. 관리자에게 문의하세요.'; return; }
+    } catch {}
+    // 저장된 토큰이 있으면 하트비트로 유효성 확인
+    if (_token) {
+      try {
+        const r = await fetch(`${API}/api/auth/heartbeat`, { method: 'POST', headers: { 'Authorization': `Bearer ${_token}` } });
+        if (r.ok) {
+          document.getElementById('login-screen').classList.add('hidden');
+          loadStat(); startHeartbeat(); return;
+        }
+      } catch {}
+      _token = ''; sessionStorage.removeItem('chat_token');
     }
-  }).catch(() => {});
+  })();
 
   async function loadStat() {
     try {
