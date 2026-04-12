@@ -1,4 +1,5 @@
 import logging
+import re
 from typing import Any
 
 import chromadb
@@ -7,6 +8,51 @@ from chromadb.utils import embedding_functions
 from config import CHROMA_DIR, COLLECTION_NAME
 
 logger = logging.getLogger(__name__)
+
+# 한국어 조사 목록 (길이 내림차순 — 긴 것 먼저 매칭)
+_PARTICLES = sorted([
+    '에서부터', '으로부터', '한테서', '으로서', '에게서',
+    '이라고', '이라는', '라고', '라는', '이랑', '이며', '이고',
+    '에서', '으로', '에게', '한테', '부터', '까지', '이라',
+    '가', '이', '을', '를', '은', '는', '에', '의', '도', '만',
+    '과', '와', '랑', '며', '고', '서', '게',
+], key=len, reverse=True)
+
+# 동사/형용사/의문사 — 검색 키워드로 부적합
+_STOPWORDS = {
+    '알려줘', '알려', '가르쳐줘', '가르쳐', '설명해줘', '설명해', '말해줘', '말해',
+    '뭐야', '뭐가', '뭔가', '뭔', '무엇', '어떤', '어떻게', '왜', '언제',
+    '어디', '누가', '누구', '무슨', '있어', '없어', '알아', '궁금',
+    '했어', '했던', '하는', '한다', '했다', '한것', '한일', '할일',
+    '됐어', '된것', '되는', '무엇인가', '합니까', '습니까',
+}
+
+def _extract_nouns(query: str) -> list[str]:
+    """
+    공백으로 분리 후 조사 제거, 동사/기능어 필터링 — 명사 위주 키워드만 반환.
+    예) '최우가 한일 알려줘' → ['최우']
+    """
+    tokens = re.split(r'\s+', query.strip())
+    result = []
+    for token in tokens:
+        if not token:
+            continue
+        # 불용어 전체 매칭
+        if token in _STOPWORDS:
+            continue
+        # 조사 제거
+        stripped = token
+        for p in _PARTICLES:
+            if stripped.endswith(p) and len(stripped) - len(p) >= 2:
+                stripped = stripped[:-len(p)]
+                break
+        # 제거 후 불용어 재확인
+        if stripped in _STOPWORDS:
+            continue
+        # 최소 2글자 이상인 경우만 키워드로 사용
+        if len(stripped) >= 2:
+            result.append(stripped)
+    return result
 
 # 한국어 포함 다국어 지원 모델
 EMBED_MODEL = "paraphrase-multilingual-MiniLM-L12-v2"
@@ -59,20 +105,18 @@ class VectorStore:
             vector_docs[results["ids"][0][i]] = {
                 "content": doc,
                 "metadata": results["metadatas"][0][i],
-                "vector_score": 1 - dist,  # 거리 → 유사도
+                "vector_score": 1 - dist,
                 "keyword_score": 0.0,
             }
 
-        # 2. 키워드 점수: 띄어쓰기 무시하고 키워드 포함 여부 확인
-        keywords = [w for w in re.split(r'\s+', query) if len(w) >= 2]
-        query_nospace = re.sub(r'\s+', '', query)  # 공백 제거 쿼리
+        # 2. 명사 위주 키워드 추출 후 점수 계산
+        keywords = _extract_nouns(query)
+        query_nospace = re.sub(r'\s+', '', query)
         if keywords:
-            for doc_id, item in vector_docs.items():
+            for item in vector_docs.values():
                 content_norm = normalize_korean(item["content"])
                 content_nospace = re.sub(r'\s+', '', content_norm)
-                # 단어 단위 매칭 + 공백 제거 후 매칭
                 hit = sum(1 for kw in keywords if kw in content_norm or kw in content_nospace)
-                # 쿼리 전체(공백 제거)가 본문에 있으면 보너스
                 if len(query_nospace) >= 4 and query_nospace in content_nospace:
                     hit += len(keywords) * 0.5
                 item["keyword_score"] = min(hit / len(keywords), 1.5)
