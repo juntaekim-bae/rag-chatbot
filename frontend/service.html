@@ -340,6 +340,37 @@
 
   document.getElementById('question').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendChat(); } });
   document.getElementById('question').addEventListener('input', function () { this.style.height = 'auto'; this.style.height = Math.min(this.scrollHeight, 120) + 'px'; });
+
+  document.getElementById('question').addEventListener('paste', async (e) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        e.preventDefault();
+        if (isStreaming) return;
+        const file = item.getAsFile();
+        const extra = document.getElementById('question').value.trim();
+        document.getElementById('question').value = '';
+        document.getElementById('question').style.height = 'auto';
+        const objectUrl = URL.createObjectURL(file);
+        isStreaming = true;
+        document.getElementById('send-btn').disabled = true;
+        document.getElementById('welcome')?.remove();
+        const msgs = document.getElementById('messages');
+        const userWrap = document.createElement('div');
+        userWrap.className = 'msg user';
+        userWrap.innerHTML = `<div class="avatar">👤</div><div class="bubble-wrap"><img src="${objectUrl}" class="img-preview" />${extra ? `<div class="bubble">${extra}</div>` : ''}</div>`;
+        msgs.appendChild(userWrap);
+        msgs.scrollTop = msgs.scrollHeight;
+        isStreaming = false;
+        const fd = new FormData();
+        fd.append('file', file);
+        if (extra) fd.append('extra', extra);
+        await streamResponse(fetch(`${API}/api/chat/image`, { method: 'POST', body: fd }), extra ? `[이미지] ${extra}` : '[이미지로 질문]');
+        return;
+      }
+    }
+  });
 </script>
 </body>
 </html>
