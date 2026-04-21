@@ -16,6 +16,22 @@ logger = logging.getLogger(__name__)
 groq_client = Groq(api_key=GROQ_API_KEY)
 
 VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
+FALLBACK_MODEL = "llama-3.1-8b-instant"
+
+
+def _groq_stream(messages: list, max_tokens: int):
+    """rate limit(429) 발생 시 fallback 모델로 자동 재시도."""
+    try:
+        return groq_client.chat.completions.create(
+            model=MODEL, max_tokens=max_tokens, stream=True, messages=messages
+        )
+    except Exception as e:
+        if "rate_limit" in str(e).lower() or "429" in str(e):
+            logger.warning(f"Rate limit on {MODEL}, switching to {FALLBACK_MODEL}")
+            return groq_client.chat.completions.create(
+                model=FALLBACK_MODEL, max_tokens=max_tokens, stream=True, messages=messages
+            )
+        raise
 
 _KOREAN_ONLY = (
     "【언어 규칙 — 절대 원칙】"
@@ -259,14 +275,11 @@ def chat_stream(question: str, vector_store) -> Iterator[str]:
 
         full_answer = ""
         try:
-            stream = groq_client.chat.completions.create(
-                model=MODEL, max_tokens=2048, stream=True,
-                messages=[
+            stream = _groq_stream([
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": f"=== 문서 ===\n{context}\n\n=== 질문 ===\n{question}\n\n반드시 한국어로만 답변하세요."},
                     {"role": "assistant", "content": ""}
-                ]
-            )
+                ], max_tokens=2048)
             for chunk in stream:
                 text = chunk.choices[0].delta.content
                 if text:
@@ -304,14 +317,11 @@ def chat_stream(question: str, vector_store) -> Iterator[str]:
 
         sub_text = ""
         try:
-            stream = groq_client.chat.completions.create(
-                model=MODEL, max_tokens=600, stream=True,
-                messages=[
+            stream = _groq_stream([
                     {"role": "system", "content": SUB_SYSTEM_PROMPT},
                     {"role": "user", "content": f"=== 문서 ===\n{context}\n\n=== 질문 ===\n{sq}\n\n반드시 한국어로만 답변하세요."},
                     {"role": "assistant", "content": ""}
-                ]
-            )
+                ], max_tokens=600)
             for chunk in stream:
                 text = chunk.choices[0].delta.content
                 if text:
@@ -333,9 +343,7 @@ def chat_stream(question: str, vector_store) -> Iterator[str]:
     combined_input = "\n\n".join(sub_answers)
     full_answer = ""
     try:
-        stream = groq_client.chat.completions.create(
-            model=MODEL, max_tokens=1500, stream=True,
-            messages=[
+        stream = _groq_stream([
                 {"role": "system", "content": COMBINE_SYSTEM_PROMPT},
                 {"role": "user", "content": (
                     f"원래 질문: {question}\n\n"
@@ -343,8 +351,7 @@ def chat_stream(question: str, vector_store) -> Iterator[str]:
                     "위 내용을 통합하여 자연스럽고 완성도 있는 최종 답변을 작성하세요. 반드시 한국어로만 답변하세요."
                 )},
                 {"role": "assistant", "content": ""}
-            ]
-        )
+            ], max_tokens=1500)
         for chunk in stream:
             text = chunk.choices[0].delta.content
             if text:
