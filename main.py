@@ -298,7 +298,6 @@ async def chat_image(
         headers={
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
-            "X-Extracted-Question": question[:200],
         },
     )
 
