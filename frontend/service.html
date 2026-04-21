@@ -218,7 +218,7 @@
     wrap.appendChild(avatar);
     wrap.appendChild(bwrap);
     msgs.appendChild(wrap);
-    msgs.scrollTop = msgs.scrollHeight;
+    requestAnimationFrame(() => { msgs.scrollTop = msgs.scrollHeight; });
     return { bubble, bwrap };
   }
 
@@ -244,7 +244,7 @@
     let aiText = '', sources = [];
     const subBlocks = {};
     const msgs = document.getElementById('messages');
-    const scroll = () => { msgs.scrollTop = msgs.scrollHeight; };
+    const scroll = () => requestAnimationFrame(() => { msgs.scrollTop = msgs.scrollHeight; });
 
     try {
       const res = await fetchPromise;
@@ -333,7 +333,7 @@
     userWrap.className = 'msg user';
     userWrap.innerHTML = `<div class="avatar">👤</div><div class="bubble-wrap"><img src="${objectUrl}" class="img-preview" />${extra ? `<div class="bubble">${extra}</div>` : ''}</div>`;
     msgs.appendChild(userWrap);
-    msgs.scrollTop = msgs.scrollHeight;
+    requestAnimationFrame(() => { msgs.scrollTop = msgs.scrollHeight; });
     isStreaming = false;
     const fd = new FormData();
     fd.append('file', file);
@@ -390,7 +390,7 @@
     userWrap.className = 'msg user';
     userWrap.innerHTML = `<div class="avatar">👤</div><div class="bubble-wrap"><img src="${objectUrl}" class="img-preview" />${extra ? `<div class="bubble">${extra}</div>` : ''}</div>`;
     msgs.appendChild(userWrap);
-    msgs.scrollTop = msgs.scrollHeight;
+    requestAnimationFrame(() => { msgs.scrollTop = msgs.scrollHeight; });
     isStreaming = false;
     const fd = new FormData();
     fd.append('file', file);
