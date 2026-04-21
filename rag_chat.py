@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 groq_client = Groq(api_key=GROQ_API_KEY)
 
 VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
-FALLBACK_MODEL = "qwen/qwen3-32b"
+FALLBACK_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
 
 
 def _trim_context(messages: list, max_doc_chars: int = 6000) -> list:
@@ -38,18 +38,16 @@ def _trim_context(messages: list, max_doc_chars: int = 6000) -> list:
     return result
 
 
-_KOREAN_FORCE = "\n\n[SYSTEM: You MUST respond ONLY in Korean (한국어). Do NOT use English under any circumstances.]"
-
-
 def _apply_korean_force(messages: list) -> list:
-    """user 메시지 끝에 한국어 강제 지시 추가 (fallback 모델용)."""
+    """fallback 모델용: 시스템 프롬프트 강화 + 한국어 assistant prefill 주입."""
     result = []
     for msg in messages:
-        if msg["role"] == "user":
-            result.append({**msg, "content": msg["content"] + _KOREAN_FORCE})
+        if msg["role"] == "system":
+            # 시스템 프롬프트 맨 앞에 한국어 강제 지시 추가
+            result.append({**msg, "content": "You MUST respond ONLY in Korean (한국어). No English allowed.\n\n" + msg["content"]})
         elif msg["role"] == "assistant" and msg.get("content") == "":
-            # 빈 assistant prefill 제거 — Qwen은 빈 prefill을 무시하거나 오작동할 수 있음
-            continue
+            # 빈 prefill → 한국어 시작 텍스트로 교체해 모델이 한국어로 이어가도록 강제
+            result.append({**msg, "content": "네, 한국어로 답변드리겠습니다.\n\n"})
         else:
             result.append(msg)
     return result
