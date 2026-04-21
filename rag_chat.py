@@ -95,7 +95,12 @@ _FOREIGN_RE = re.compile(
 )
 
 def _strip_foreign(text: str) -> str:
-    """한자·일본어 문자 제거 후 연속 공백 정리."""
+    """한자를 한글 독음으로 변환, 나머지 외국 문자 제거."""
+    try:
+        import hanja
+        text = hanja.translate(text, 'substitution')
+    except Exception:
+        pass
     cleaned = _FOREIGN_RE.sub('', text)
     return re.sub(r'  +', ' ', cleaned)
 
