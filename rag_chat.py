@@ -16,22 +16,56 @@ logger = logging.getLogger(__name__)
 groq_client = Groq(api_key=GROQ_API_KEY)
 
 VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
-FALLBACK_MODEL = "llama-3.1-8b-instant"
+FALLBACK_MODEL = "qwen/qwen3-32b"
+
+
+def _trim_context(messages: list, max_doc_chars: int = 6000) -> list:
+    """문서 컨텍스트가 너무 길면 잘라서 반환."""
+    result = []
+    for msg in messages:
+        content = msg.get("content", "")
+        if msg["role"] == "user" and "=== 문서 ===" in content:
+            doc_start = content.find("=== 문서 ===")
+            rest_start = content.find("\n\n=== 질문 ===")
+            if doc_start != -1 and rest_start != -1:
+                doc_section = content[doc_start:rest_start]
+                if len(doc_section) > max_doc_chars:
+                    doc_section = doc_section[:max_doc_chars] + "\n...(문서 일부 생략)"
+                content = content[:doc_start] + doc_section + content[rest_start:]
+            result.append({**msg, "content": content})
+        else:
+            result.append(msg)
+    return result
 
 
 def _groq_stream(messages: list, max_tokens: int):
-    """rate limit(429) 발생 시 fallback 모델로 자동 재시도."""
+    """rate limit(429) 또는 요청 초과(413) 시 fallback 모델로 자동 재시도. 그래도 실패하면 컨텍스트를 줄여 재시도."""
+    def _is_rate_or_size(e: Exception) -> bool:
+        s = str(e).lower()
+        return "rate_limit" in s or "429" in s or "413" in s or "request too large" in s
+
     try:
         return groq_client.chat.completions.create(
             model=MODEL, max_tokens=max_tokens, stream=True, messages=messages
         )
     except Exception as e:
-        if "rate_limit" in str(e).lower() or "429" in str(e):
-            logger.warning(f"Rate limit on {MODEL}, switching to {FALLBACK_MODEL}")
-            return groq_client.chat.completions.create(
-                model=FALLBACK_MODEL, max_tokens=max_tokens, stream=True, messages=messages
-            )
-        raise
+        if not _is_rate_or_size(e):
+            raise
+        logger.warning(f"Rate/size limit on {MODEL}, switching to {FALLBACK_MODEL}")
+
+    try:
+        return groq_client.chat.completions.create(
+            model=FALLBACK_MODEL, max_tokens=max_tokens, stream=True, messages=messages
+        )
+    except Exception as e:
+        if not _is_rate_or_size(e):
+            raise
+        logger.warning(f"Rate/size limit on {FALLBACK_MODEL}, trimming context and retrying")
+
+    trimmed = _trim_context(messages)
+    return groq_client.chat.completions.create(
+        model=FALLBACK_MODEL, max_tokens=max_tokens, stream=True, messages=trimmed
+    )
 
 _KOREAN_ONLY = (
     "【언어 규칙 — 절대 원칙】"
