@@ -124,11 +124,11 @@ _service_locked = False
 @app.post("/api/auth/login")
 async def login(req: AuthRequest):
     global _service_locked, ACCESS_PASSWORD
-    if _service_locked:
-        raise HTTPException(423, "서비스가 잠겨 있습니다. 관리자에게 문의하세요.")
     if req.password == ADMIN_PASSWORD:
         token = _create_token("admin")
         return {"role": "admin", "token": token}
+    if _service_locked:
+        raise HTTPException(423, "서비스가 잠겨 있습니다. 관리자에게 문의하세요.")
     if req.password == ACCESS_PASSWORD:
         token = _create_token("user")
         return {"role": "user", "token": token}
