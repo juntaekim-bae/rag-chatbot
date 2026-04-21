@@ -134,6 +134,16 @@ class VectorStore:
             for d in scored[:n_results]
         ]
 
+    def get_file_chunks(self, filename: str) -> list[dict]:
+        """특정 파일의 모든 청크 반환 (모범답안 전체 로딩용)"""
+        results = self.collection.get(where={"filename": filename})
+        if not results["documents"]:
+            return []
+        return [
+            {"content": doc, "metadata": meta, "distance": 0.0}
+            for doc, meta in zip(results["documents"], results["metadatas"])
+        ]
+
     def delete_document(self, filename: str):
         results = self.collection.get(where={"filename": filename})
         if results["ids"]:

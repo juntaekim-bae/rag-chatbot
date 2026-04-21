@@ -26,9 +26,21 @@ _KOREAN_ONLY = (
     "이 규칙은 어떤 경우에도 예외가 없다."
 )
 
+_MCQ_RULES = (
+    "【객관식 문제 규칙】"
+    "질문이 4지선다 또는 5지선다 객관식 문제이거나, 문서에서 선지(①②③④⑤ 또는 1~5번)가 있는 문제를 찾은 경우: "
+    "반드시 답변 첫 줄에 '정답: X번' 형식으로 답안 번호를 명시하라. "
+    "컨텍스트에 '모범답안' 파일이 포함되어 있으면 해당 파일에서 해당 문항 번호의 정답을 최우선으로 찾아라. "
+    "모범답안의 정답 표기 형식 예시: '1번-③', '2. ①', '3번: ②', '4) 3번' 등 다양할 수 있다. "
+    "모범답안에서 정답을 찾으면 '정답: X번 (모범답안 기준)'으로 명시하고, "
+    "찾지 못한 경우 문서 내용을 근거로 가장 적절한 선지를 판단하여 번호를 제시하라."
+)
+
 SYSTEM_PROMPT = f"""{_KOREAN_ONLY}
 
 당신은 제공된 문서를 기반으로 질문에 답변하는 AI 어시스턴트입니다.
+
+{_MCQ_RULES}
 
 규칙:
 1. 문서에 직접적인 내용이 없더라도, 관련된 개념이나 유사한 내용이 있으면 그것을 바탕으로 답변하세요.
@@ -41,6 +53,9 @@ SYSTEM_PROMPT = f"""{_KOREAN_ONLY}
 SUB_SYSTEM_PROMPT = f"""{_KOREAN_ONLY}
 
 당신은 제공된 문서를 기반으로 하위 질문에 답변하는 AI 어시스턴트입니다.
+
+{_MCQ_RULES}
+
 핵심 내용을 3~5문장으로 답변하세요.
 직접적인 내용이 없어도 관련 내용이 있으면 활용하세요.
 정말 아무 관련도 없을 때만 "관련 내용 없음"이라고 하세요.
@@ -50,6 +65,9 @@ SUB_SYSTEM_PROMPT = f"""{_KOREAN_ONLY}
 COMBINE_SYSTEM_PROMPT = f"""{_KOREAN_ONLY}
 
 당신은 여러 하위 답변을 통합하여 최종 답변을 작성하는 AI 어시스턴트입니다.
+
+{_MCQ_RULES}
+
 하위 답변들을 자연스럽게 통합하여 완성도 높은 답변을 작성하세요.
 중복 내용은 제거하고, 논리적으로 흐름이 이어지게 작성하세요.
 
@@ -136,6 +154,25 @@ def image_to_question(image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
     return resp.choices[0].message.content.strip()
 
 
+# ── 출제원안↔모범답안 페어링 ──────────────────────────────────────────────────
+_PAIR_MAP = {"출제원안": "모범답안", "모범답안": "출제원안"}
+
+def _get_paired_chunks(results: list, vector_store) -> list:
+    """검색 결과에 포함된 출제원안/모범답안 파일의 짝 파일 청크를 추가로 반환."""
+    all_docs = {d["filename"] for d in vector_store.list_documents()}
+    extra, seen = [], set()
+    for r in results:
+        fname = r["metadata"].get("filename", "")
+        for src, dst in _PAIR_MAP.items():
+            if src in fname:
+                paired = fname.replace(src, dst)
+                if paired in all_docs and paired not in seen:
+                    seen.add(paired)
+                    extra.extend(vector_store.get_file_chunks(paired))
+                break
+    return extra
+
+
 # ── 유틸 ─────────────────────────────────────────────────────────────────────
 def _dedup_results(results: list) -> list:
     """거의 동일한 청크 제거 (앞 100자 기준)"""
@@ -177,6 +214,12 @@ def chat_stream(question: str, vector_store) -> Iterator[str]:
         f_search = ex.submit(vector_store.search, question, TOP_K)
         sub_questions = f_decompose.result()
         base_results = f_search.result()
+
+    # 출제원안↔모범답안 페어링 청크 추가
+    paired = _get_paired_chunks(base_results, vector_store)
+    if paired:
+        seen_ids = {r["content"][:80] for r in base_results}
+        base_results = base_results + [c for c in paired if c["content"][:80] not in seen_ids]
 
     # 3. 단일 질문이면 빠르게 처리
     if len(sub_questions) <= 1:
