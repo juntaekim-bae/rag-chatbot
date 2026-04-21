@@ -83,6 +83,23 @@ def _groq_stream(messages: list, max_tokens: int):
         model=FALLBACK_MODEL, max_tokens=max_tokens, stream=True, messages=trimmed
     )
 
+# 한자(CJK) 및 일본어 문자 필터 — 스트리밍 출력에 직접 적용
+_FOREIGN_RE = re.compile(
+    '[\u4E00-\u9FFF'   # CJK Unified Ideographs
+    '\u3400-\u4DBF'    # CJK Extension A
+    '\uF900-\uFAFF'    # CJK Compatibility Ideographs
+    '\u3040-\u309F'    # 히라가나
+    '\u30A0-\u30FF'    # 카타카나
+    '\u31F0-\u31FF'    # 카타카나 음성 확장
+    '\uFF65-\uFF9F]'   # 반각 카타카나
+)
+
+def _strip_foreign(text: str) -> str:
+    """한자·일본어 문자 제거 후 연속 공백 정리."""
+    cleaned = _FOREIGN_RE.sub('', text)
+    return re.sub(r'  +', ' ', cleaned)
+
+
 _KOREAN_ONLY = (
     "【언어 규칙 — 절대 원칙】"
     "모든 답변은 반드시 한국어로만 작성하라. "
@@ -338,6 +355,7 @@ def chat_stream(question: str, vector_store) -> Iterator[str]:
             for chunk in stream:
                 text = chunk.choices[0].delta.content
                 if text:
+                    text = _strip_foreign(text)
                     full_answer += text
                     yield f"data: {json.dumps({'type': 'text', 'content': text})}\n\n"
         except Exception as e:
@@ -380,6 +398,7 @@ def chat_stream(question: str, vector_store) -> Iterator[str]:
             for chunk in stream:
                 text = chunk.choices[0].delta.content
                 if text:
+                    text = _strip_foreign(text)
                     sub_text += text
                     yield f"data: {json.dumps({'type': 'sub_text', 'index': i, 'content': text})}\n\n"
         except Exception as e:
@@ -410,6 +429,7 @@ def chat_stream(question: str, vector_store) -> Iterator[str]:
         for chunk in stream:
             text = chunk.choices[0].delta.content
             if text:
+                text = _strip_foreign(text)
                 full_answer += text
                 yield f"data: {json.dumps({'type': 'text', 'content': text})}\n\n"
     except Exception as e:
