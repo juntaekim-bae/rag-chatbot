@@ -193,7 +193,8 @@ def chat_stream(question: str, vector_store) -> Iterator[str]:
                 model=MODEL, max_tokens=2048, stream=True,
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": f"=== 문서 ===\n{context}\n\n=== 질문 ===\n{question}\n\n반드시 한국어로만 답변하세요."}
+                    {"role": "user", "content": f"=== 문서 ===\n{context}\n\n=== 질문 ===\n{question}\n\n반드시 한국어로만 답변하세요."},
+                    {"role": "assistant", "content": ""}
                 ]
             )
             for chunk in stream:
@@ -237,7 +238,8 @@ def chat_stream(question: str, vector_store) -> Iterator[str]:
                 model=MODEL, max_tokens=600, stream=True,
                 messages=[
                     {"role": "system", "content": SUB_SYSTEM_PROMPT},
-                    {"role": "user", "content": f"=== 문서 ===\n{context}\n\n=== 질문 ===\n{sq}\n\n반드시 한국어로만 답변하세요."}
+                    {"role": "user", "content": f"=== 문서 ===\n{context}\n\n=== 질문 ===\n{sq}\n\n반드시 한국어로만 답변하세요."},
+                    {"role": "assistant", "content": ""}
                 ]
             )
             for chunk in stream:
@@ -269,7 +271,8 @@ def chat_stream(question: str, vector_store) -> Iterator[str]:
                     f"원래 질문: {question}\n\n"
                     f"하위 답변들:\n{combined_input}\n\n"
                     "위 내용을 통합하여 자연스럽고 완성도 있는 최종 답변을 작성하세요. 반드시 한국어로만 답변하세요."
-                )}
+                )},
+                {"role": "assistant", "content": ""}
             ]
         )
         for chunk in stream:
