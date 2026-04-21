@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 groq_client = Groq(api_key=GROQ_API_KEY)
 
-VISION_MODEL = "llama-3.2-11b-vision-preview"
+VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
 
 _KOREAN_ONLY = (
     "【언어 규칙 — 절대 원칙】"

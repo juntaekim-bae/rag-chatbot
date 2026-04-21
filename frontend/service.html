@@ -66,6 +66,8 @@
     .input-bar { padding: 14px 20px; background: var(--surface); border-top: 1px solid var(--border); display: flex; gap: 10px; align-items: flex-end; }
     .input-bar textarea { flex: 1; resize: none; border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; font-size: 14px; font-family: inherit; outline: none; max-height: 120px; min-height: 44px; line-height: 1.5; transition: border-color .2s; }
     .input-bar textarea:focus { border-color: var(--primary); }
+    .drag-overlay { display: none; position: fixed; inset: 0; background: rgba(99,102,241,.15); border: 3px dashed var(--primary); z-index: 1000; pointer-events: none; align-items: center; justify-content: center; font-size: 1.4rem; color: var(--primary); font-weight: 600; }
+    .drag-overlay.active { display: flex; }
     .img-btn { width: 44px; height: 44px; border-radius: 10px; background: #f0f4ff; border: 1px solid var(--border); color: var(--primary); font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
     .img-btn:hover { background: #e0e7ff; }
     #img-input { display: none; }
@@ -116,6 +118,7 @@
 </main>
 
 <div id="toast"></div>
+<div class="drag-overlay" id="drag-overlay">이미지를 여기에 놓으세요</div>
 
 <script>
   const API = '';
@@ -370,6 +373,42 @@
         return;
       }
     }
+  });
+
+  // 드래그 앤 드롭
+  async function handleImageFile(file) {
+    if (!file || !file.type.startsWith('image/') || isStreaming) return;
+    const extra = document.getElementById('question').value.trim();
+    document.getElementById('question').value = '';
+    document.getElementById('question').style.height = 'auto';
+    const objectUrl = URL.createObjectURL(file);
+    isStreaming = true;
+    document.getElementById('send-btn').disabled = true;
+    document.getElementById('welcome')?.remove();
+    const msgs = document.getElementById('messages');
+    const userWrap = document.createElement('div');
+    userWrap.className = 'msg user';
+    userWrap.innerHTML = `<div class="avatar">👤</div><div class="bubble-wrap"><img src="${objectUrl}" class="img-preview" />${extra ? `<div class="bubble">${extra}</div>` : ''}</div>`;
+    msgs.appendChild(userWrap);
+    msgs.scrollTop = msgs.scrollHeight;
+    isStreaming = false;
+    const fd = new FormData();
+    fd.append('file', file);
+    if (extra) fd.append('extra', extra);
+    await streamResponse(fetch(`${API}/api/chat/image`, { method: 'POST', body: fd }), extra ? `[이미지] ${extra}` : '[이미지로 질문]');
+  }
+
+  let dragCounter = 0;
+  const dragOverlay = document.getElementById('drag-overlay');
+  document.addEventListener('dragenter', e => { if ([...e.dataTransfer.types].includes('Files')) { dragCounter++; dragOverlay.classList.add('active'); } });
+  document.addEventListener('dragleave', () => { if (--dragCounter <= 0) { dragCounter = 0; dragOverlay.classList.remove('active'); } });
+  document.addEventListener('dragover', e => e.preventDefault());
+  document.addEventListener('drop', async e => {
+    e.preventDefault();
+    dragCounter = 0;
+    dragOverlay.classList.remove('active');
+    const file = [...e.dataTransfer.files].find(f => f.type.startsWith('image/'));
+    if (file) await handleImageFile(file);
   });
 </script>
 </body>
