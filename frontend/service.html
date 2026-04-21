@@ -304,7 +304,10 @@
     const input = document.getElementById('question');
     const question = input.value.trim();
     if (!question) return;
-    input.value = ''; input.style.height = 'auto';
+    input.value = '';
+    input.blur();
+    input.style.height = 'auto';
+    requestAnimationFrame(() => input.focus());
     await streamResponse(fetch(`${API}/api/chat`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ question }),
