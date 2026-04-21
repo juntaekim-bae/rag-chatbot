@@ -184,7 +184,7 @@
     <input type="password" id="new-pw" placeholder="새 접속 비밀번호 입력" />
     <div class="admin-actions">
       <button class="admin-btn primary" onclick="changePassword()">비밀번호 변경</button>
-      <button class="admin-btn danger" onclick="lockService()">서비스 잠금</button>
+      <button class="admin-btn danger" id="lock-btn" onclick="toggleLock()">서비스 잠금</button>
     </div>
     <div class="admin-msg" id="admin-msg"></div>
   </div>
@@ -276,6 +276,7 @@
       document.getElementById('login-screen').classList.add('hidden');
       loadDocs();
       loadDriveConfig();
+      loadLockStatus();
     } catch { errEl.textContent = '서버 오류.'; }
   }
   document.getElementById('login-pw').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
@@ -292,14 +293,50 @@
     if (res.ok) document.getElementById('new-pw').value = '';
   }
 
-  async function lockService() {
-    if (!confirm('서비스를 잠그면 일반 사용자가 접속할 수 없습니다. 계속할까요?')) return;
-    const res = await fetch(`${API}/api/auth/admin`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ admin_password: _adminPw, new_password: 'LOCK' }),
-    });
-    const data = await res.json();
-    document.getElementById('admin-msg').textContent = data.message || data.detail;
+  let _isLocked = false;
+
+  async function loadLockStatus() {
+    try {
+      const res = await fetch(`${API}/api/auth/status`);
+      const data = await res.json();
+      _isLocked = data.locked;
+      updateLockBtn();
+    } catch {}
+  }
+
+  function updateLockBtn() {
+    const btn = document.getElementById('lock-btn');
+    if (_isLocked) {
+      btn.textContent = '서비스 잠금 해제';
+      btn.style.background = '#276749';
+      btn.style.borderColor = '#276749';
+    } else {
+      btn.textContent = '서비스 잠금';
+      btn.style.background = '';
+      btn.style.borderColor = '';
+    }
+  }
+
+  async function toggleLock() {
+    if (_isLocked) {
+      if (!confirm('서비스 잠금을 해제하시겠습니까?')) return;
+      const res = await fetch(`${API}/api/auth/admin`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ admin_password: _adminPw, new_password: 'UNLOCK' }),
+      });
+      const data = await res.json();
+      document.getElementById('admin-msg').textContent = data.message || data.detail;
+      if (res.ok) { _isLocked = false; updateLockBtn(); }
+    } else {
+      if (!confirm('서비스를 잠그면 일반 사용자가 접속할 수 없습니다. 계속할까요?')) return;
+      const res = await fetch(`${API}/api/auth/admin`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ admin_password: _adminPw, new_password: 'LOCK' }),
+      });
+      const data = await res.json();
+      document.getElementById('admin-msg').textContent = data.message || data.detail;
+      if (res.ok) { _isLocked = true; updateLockBtn(); }
+    }
   }
 
   function toast(msg, type = '') {
