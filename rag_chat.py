@@ -38,6 +38,23 @@ def _trim_context(messages: list, max_doc_chars: int = 6000) -> list:
     return result
 
 
+_KOREAN_FORCE = "\n\n[SYSTEM: You MUST respond ONLY in Korean (한국어). Do NOT use English under any circumstances.]"
+
+
+def _apply_korean_force(messages: list) -> list:
+    """user 메시지 끝에 한국어 강제 지시 추가 (fallback 모델용)."""
+    result = []
+    for msg in messages:
+        if msg["role"] == "user":
+            result.append({**msg, "content": msg["content"] + _KOREAN_FORCE})
+        elif msg["role"] == "assistant" and msg.get("content") == "":
+            # 빈 assistant prefill 제거 — Qwen은 빈 prefill을 무시하거나 오작동할 수 있음
+            continue
+        else:
+            result.append(msg)
+    return result
+
+
 def _groq_stream(messages: list, max_tokens: int):
     """rate limit(429) 또는 요청 초과(413) 시 fallback 모델로 자동 재시도. 그래도 실패하면 컨텍스트를 줄여 재시도."""
     def _is_rate_or_size(e: Exception) -> bool:
@@ -53,16 +70,17 @@ def _groq_stream(messages: list, max_tokens: int):
             raise
         logger.warning(f"Rate/size limit on {MODEL}, switching to {FALLBACK_MODEL}")
 
+    fallback_messages = _apply_korean_force(messages)
     try:
         return groq_client.chat.completions.create(
-            model=FALLBACK_MODEL, max_tokens=max_tokens, stream=True, messages=messages
+            model=FALLBACK_MODEL, max_tokens=max_tokens, stream=True, messages=fallback_messages
         )
     except Exception as e:
         if not _is_rate_or_size(e):
             raise
         logger.warning(f"Rate/size limit on {FALLBACK_MODEL}, trimming context and retrying")
 
-    trimmed = _trim_context(messages)
+    trimmed = _trim_context(fallback_messages)
     return groq_client.chat.completions.create(
         model=FALLBACK_MODEL, max_tokens=max_tokens, stream=True, messages=trimmed
     )
