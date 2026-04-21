@@ -151,9 +151,22 @@ _MCQ_RULES = """【객관식 문제 출력 형식 — 절대 준수】
 ▶ 정답: X번 (모범답안 기준) 또는 ▶ 정답: X번 (문서 근거)
 이유: 왜 이 선지가 답인지 1~2문장으로 요약하라.
 
-【모범답안 참조】
-컨텍스트에 모범답안 파일이 있으면 해당 파일의 정답 번호를 최우선으로 사용하라.
-모범답안 표기 형식 예: '1번-③', '2. ①', '3번: ②' 등."""
+【모범답안 우선 원칙 — 반드시 준수】
+컨텍스트에 "=== 모범답안 ===" 섹션이 있으면 다음을 따르라.
+
+1. 모범답안에 표기된 정답 번호를 최종 정답으로 반드시 사용하라.
+   (모범답안 표기 예: '1번-③', '2. ①', '3번: ②', '③' 등)
+
+2. 분석 결과(2단계)가 모범답안 정답과 일치하면:
+   ▶ 정답: X번 (모범답안 일치)
+
+3. 분석 결과와 모범답안 정답이 다르면:
+   ▶ 정답: X번 (모범답안 기준)
+   ⚠️ 불일치 원인 분석:
+   - 분석 결과: Y번 / 모범답안: X번
+   - 원인: [왜 분석과 다른지 — 문서 내용 부족, 선지 해석 차이, 모범답안 오류 가능성 등을 구체적으로 설명]
+
+4. 모범답안이 없으면 분석 결과를 그대로 사용하라."""
 
 SYSTEM_PROMPT = f"""{_KOREAN_ONLY}
 
@@ -308,13 +321,20 @@ def _dedup_results(results: list) -> list:
 def _build_context(results: list) -> tuple[str, list[str]]:
     results = _dedup_results(results)
     sources: list[str] = []
-    parts: list[str] = []
+    doc_parts: list[str] = []
+    mobeom_parts: list[str] = []
     for r in results:
         fname = r["metadata"].get("filename", "Unknown")
         if fname not in sources:
             sources.append(fname)
-        parts.append(f"[출처: {fname}]\n{r['content']}")
-    return "\n\n---\n\n".join(parts), sources
+        if "모범답안" in fname:
+            mobeom_parts.append(f"[출처: {fname}]\n{r['content']}")
+        else:
+            doc_parts.append(f"[출처: {fname}]\n{r['content']}")
+    context = "\n\n---\n\n".join(doc_parts)
+    if mobeom_parts:
+        context += "\n\n=== 모범답안 ===\n" + "\n\n---\n\n".join(mobeom_parts)
+    return context, sources
 
 
 # ── 메인 스트림 ───────────────────────────────────────────────────────────────
