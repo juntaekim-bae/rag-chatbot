@@ -335,7 +335,7 @@
     await streamResponse(fetch(`${API}/api/chat/image`, { method: 'POST', body: fd }), extra ? `[이미지] ${extra}` : '[이미지로 질문]');
   });
 
-  document.getElementById('question').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); } });
+  document.getElementById('question').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendChat(); } });
   document.getElementById('question').addEventListener('input', function () { this.style.height = 'auto'; this.style.height = Math.min(this.scrollHeight, 120) + 'px'; });
 </script>
 </body>

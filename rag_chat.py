@@ -17,28 +17,42 @@ groq_client = Groq(api_key=GROQ_API_KEY)
 
 VISION_MODEL = "llama-3.2-11b-vision-preview"
 
-SYSTEM_PROMPT = """당신은 제공된 문서를 기반으로 질문에 답변하는 AI 어시스턴트입니다.
-반드시 한국어로만 답변하세요. 영어·중국어·베트남어·스페인어 등 어떤 외국어도 절대 사용하지 마세요.
-문서에 외국어 단어가 있어도 한국어로 바꿔서 답변하세요.
+_KOREAN_ONLY = (
+    "【언어 규칙 — 절대 원칙】"
+    "모든 답변은 반드시 한국어로만 작성하라. "
+    "영어·중국어·베트남어·일본어·스페인어 등 어떤 외국어도 단 한 글자도 사용하지 말 것. "
+    "문서나 질문에 외국어가 포함되어 있어도 답변은 한국어로만 작성하라. "
+    "이 규칙은 어떤 경우에도 예외가 없다."
+)
+
+SYSTEM_PROMPT = f"""{_KOREAN_ONLY}
+
+당신은 제공된 문서를 기반으로 질문에 답변하는 AI 어시스턴트입니다.
 
 규칙:
 1. 문서에 직접적인 내용이 없더라도, 관련된 개념이나 유사한 내용이 있으면 그것을 바탕으로 답변하세요.
 2. 문서에 전혀 관련 내용이 없을 때만 "문서에서 찾을 수 없습니다"라고 하세요.
 3. 답변은 명확하고 구조적으로 작성하세요.
-4. 문서 내용을 최대한 활용하여 풍부하게 답변하세요."""
+4. 문서 내용을 최대한 활용하여 풍부하게 답변하세요.
 
-SUB_SYSTEM_PROMPT = """당신은 제공된 문서를 기반으로 하위 질문에 답변하는 AI 어시스턴트입니다.
-반드시 한국어로만 답변하세요. 영어·중국어·베트남어·스페인어 등 어떤 외국어도 절대 사용하지 마세요.
-문서에 외국어 단어가 있어도 한국어로 바꿔서 답변하세요.
+{_KOREAN_ONLY}"""
+
+SUB_SYSTEM_PROMPT = f"""{_KOREAN_ONLY}
+
+당신은 제공된 문서를 기반으로 하위 질문에 답변하는 AI 어시스턴트입니다.
 핵심 내용을 3~5문장으로 답변하세요.
 직접적인 내용이 없어도 관련 내용이 있으면 활용하세요.
-정말 아무 관련도 없을 때만 "관련 내용 없음"이라고 하세요."""
+정말 아무 관련도 없을 때만 "관련 내용 없음"이라고 하세요.
 
-COMBINE_SYSTEM_PROMPT = """당신은 여러 하위 답변을 통합하여 최종 답변을 작성하는 AI 어시스턴트입니다.
-반드시 한국어로만 답변하세요. 영어·중국어·베트남어·스페인어 등 어떤 외국어도 절대 사용하지 마세요.
-문서에 외국어 단어가 있어도 한국어로 바꿔서 답변하세요.
+{_KOREAN_ONLY}"""
+
+COMBINE_SYSTEM_PROMPT = f"""{_KOREAN_ONLY}
+
+당신은 여러 하위 답변을 통합하여 최종 답변을 작성하는 AI 어시스턴트입니다.
 하위 답변들을 자연스럽게 통합하여 완성도 높은 답변을 작성하세요.
-중복 내용은 제거하고, 논리적으로 흐름이 이어지게 작성하세요."""
+중복 내용은 제거하고, 논리적으로 흐름이 이어지게 작성하세요.
+
+{_KOREAN_ONLY}"""
 
 
 # ── 질문 캐시 ─────────────────────────────────────────────────────────────────
@@ -179,7 +193,7 @@ def chat_stream(question: str, vector_store) -> Iterator[str]:
                 model=MODEL, max_tokens=2048, stream=True,
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": f"=== 문서 ===\n{context}\n\n=== 질문 ===\n{question}"}
+                    {"role": "user", "content": f"=== 문서 ===\n{context}\n\n=== 질문 ===\n{question}\n\n반드시 한국어로만 답변하세요."}
                 ]
             )
             for chunk in stream:
@@ -223,7 +237,7 @@ def chat_stream(question: str, vector_store) -> Iterator[str]:
                 model=MODEL, max_tokens=600, stream=True,
                 messages=[
                     {"role": "system", "content": SUB_SYSTEM_PROMPT},
-                    {"role": "user", "content": f"=== 문서 ===\n{context}\n\n=== 질문 ===\n{sq}"}
+                    {"role": "user", "content": f"=== 문서 ===\n{context}\n\n=== 질문 ===\n{sq}\n\n반드시 한국어로만 답변하세요."}
                 ]
             )
             for chunk in stream:
@@ -254,7 +268,7 @@ def chat_stream(question: str, vector_store) -> Iterator[str]:
                 {"role": "user", "content": (
                     f"원래 질문: {question}\n\n"
                     f"하위 답변들:\n{combined_input}\n\n"
-                    "위 내용을 통합하여 자연스럽고 완성도 있는 최종 답변을 작성하세요."
+                    "위 내용을 통합하여 자연스럽고 완성도 있는 최종 답변을 작성하세요. 반드시 한국어로만 답변하세요."
                 )}
             ]
         )
