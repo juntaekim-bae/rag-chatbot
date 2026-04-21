@@ -289,6 +289,27 @@ def image_to_question(image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
 # ── 출제원안↔모범답안 페어링 ──────────────────────────────────────────────────
 _PAIR_MAP = {"출제원안": "모범답안", "모범답안": "출제원안"}
 
+# 모범답안 정답 추출 패턴 — "5. ③", "5번 ③", "5번-③", "5) ③" 등
+_ANS_RE = re.compile(r'(\d+)\s*[번\.\)\-:]\s*[-]?\s*([①②③④⑤])')
+# 질문에서 문항 번호 추출 — "5.", "5번", "문 5" 등
+_QNUM_RE = re.compile(r'(?:문\s*)?(\d+)\s*[번\.\)]')
+
+def _extract_answer_from_mobeom(mobeom_chunks: list, question: str) -> Optional[str]:
+    """모범답안 청크에서 질문에 해당하는 정답을 추출. 찾으면 '③' 형태로 반환."""
+    # 질문에서 문항 번호 추출
+    qnum_match = _QNUM_RE.search(question)
+    if not qnum_match:
+        return None
+    qnum = qnum_match.group(1)
+
+    for chunk in mobeom_chunks:
+        text = re.sub(r'\s+', ' ', chunk["content"])
+        # "5. ③" 또는 "5번 ③" 패턴
+        m = re.search(rf'{qnum}\s*[번\.\)\-:]\s*[-]?\s*([①②③④⑤])', text)
+        if m:
+            return m.group(1)
+    return None
+
 def _get_paired_chunks(results: list, vector_store) -> list:
     """검색 결과에 포함된 출제원안/모범답안 파일의 짝 파일 청크를 추가로 반환."""
     all_docs = {d["filename"] for d in vector_store.list_documents()}
@@ -356,6 +377,10 @@ def chat_stream(question: str, vector_store) -> Iterator[str]:
 
     # 출제원안↔모범답안 페어링 청크 추가
     paired = _get_paired_chunks(base_results, vector_store)
+    # 모범답안 청크 분리 및 정답 사전 추출
+    mobeom_chunks = [c for c in paired if "모범답안" in c["metadata"].get("filename", "")]
+    confirmed_answer = _extract_answer_from_mobeom(mobeom_chunks, question) if mobeom_chunks else None
+
     if paired:
         seen_ids = {r["content"][:80] for r in base_results}
         base_results = base_results + [c for c in paired if c["content"][:80] not in seen_ids]
@@ -370,11 +395,16 @@ def chat_stream(question: str, vector_store) -> Iterator[str]:
         context, sources = _build_context(base_results)
         yield f"data: {json.dumps({'type': 'sources', 'sources': sources})}\n\n"
 
+        # 모범답안 정답이 추출된 경우 유저 메시지에 명시적으로 주입
+        answer_hint = ""
+        if confirmed_answer:
+            answer_hint = f"\n\n【모범답안 확정 정답】이 문제의 정답은 {confirmed_answer}번입니다. 반드시 이 번호를 최종 정답으로 사용하고, 분석 결과가 다르면 불일치 원인을 설명하세요."
+
         full_answer = ""
         try:
             stream = _groq_stream([
                     {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": f"=== 문서 ===\n{context}\n\n=== 질문 ===\n{question}\n\n반드시 한국어로만 답변하세요."},
+                    {"role": "user", "content": f"=== 문서 ===\n{context}\n\n=== 질문 ===\n{question}{answer_hint}\n\n반드시 한국어로만 답변하세요."},
                     {"role": "assistant", "content": ""}
                 ], max_tokens=2048)
             for chunk in stream:
