@@ -89,7 +89,7 @@
     <div class="logo">🤖</div>
     <h2>AI 문서 챗봇</h2>
     <p>서비스를 이용하려면 비밀번호를 입력하세요</p>
-    <input type="password" id="login-pw" placeholder="비밀번호 입력" autocomplete="off" />
+    <input type="password" id="login-pw" placeholder="비밀번호 입력" autocomplete="new-password" />
     <button class="login-btn" onclick="doLogin()">입장</button>
     <div class="login-error" id="login-error"></div>
   </div>
@@ -167,6 +167,7 @@
     } catch { errEl.textContent = '서버 오류. 잠시 후 다시 시도하세요.'; }
   }
   document.getElementById('login-pw').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+  setTimeout(() => { document.getElementById('login-pw').value = ''; }, 100);
 
   // 잠금 상태 확인 / 기존 토큰 자동 복구
   (async () => {
