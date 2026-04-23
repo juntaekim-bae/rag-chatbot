@@ -52,14 +52,6 @@
     .sources { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
     .source-tag { font-size: 11px; background: #ebf4ff; color: #2b6cb0; border: 1px solid #bee3f8; border-radius: 20px; padding: 2px 10px; }
     .cached-badge { display: inline-block; font-size: 10px; background: #fef3c7; color: #92400e; border: 1px solid #fde68a; border-radius: 20px; padding: 1px 8px; margin-bottom: 4px; }
-    .decomposed { font-size: 11px; color: var(--text-muted); margin-bottom: 8px; background: #f0f4ff; border-radius: 6px; padding: 6px 10px; }
-    .decomposed span { font-weight: 600; color: var(--primary); }
-    .sub-block { background: #f8faff; border: 1px solid #e0e7ff; border-radius: 8px; margin-bottom: 8px; overflow: hidden; }
-    .sub-header { display: flex; align-items: center; gap: 6px; padding: 7px 12px; background: #eef2ff; font-size: 12px; font-weight: 600; color: var(--primary); }
-    .sub-header .sub-num { background: var(--primary); color: #fff; border-radius: 50%; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; font-size: 10px; flex-shrink: 0; }
-    .sub-body { padding: 8px 12px; font-size: 13px; line-height: 1.6; white-space: pre-wrap; color: var(--text); }
-    .final-divider { display: flex; align-items: center; gap: 8px; margin: 10px 0 6px; font-size: 12px; font-weight: 600; color: var(--primary); }
-    .final-divider::before, .final-divider::after { content: ''; flex: 1; height: 1px; background: #e0e7ff; }
     .img-preview { max-width: 200px; max-height: 150px; border-radius: 8px; margin-bottom: 6px; display: block; }
     .cursor::after { content: '▋'; animation: blink .7s infinite; }
     @keyframes blink { 0%,100% { opacity: 1 } 50% { opacity: 0 } }
@@ -268,25 +260,6 @@
             if (ev.type === 'cached') {
               const b = document.createElement('div'); b.className = 'cached-badge'; b.textContent = '⚡ 캐시된 답변';
               bwrap.insertBefore(b, bubble);
-            } else if (ev.type === 'decomposed') {
-              const d = document.createElement('div'); d.className = 'decomposed';
-              d.innerHTML = `<span>🔍 질문 분해 (${ev.questions.length}개)</span><br>${ev.questions.map((q,i)=>`${i+1}. ${q}`).join('<br>')}`;
-              bwrap.insertBefore(d, bubble);
-            } else if (ev.type === 'sub_start') {
-              const block = document.createElement('div'); block.className = 'sub-block';
-              const header = document.createElement('div'); header.className = 'sub-header';
-              header.innerHTML = `<span class="sub-num">${ev.index+1}</span>${ev.question}`;
-              const body = document.createElement('div'); body.className = 'sub-body'; body.classList.add('cursor');
-              block.appendChild(header); block.appendChild(body);
-              bwrap.insertBefore(block, bubble);
-              subBlocks[ev.index] = { body }; scroll();
-            } else if (ev.type === 'sub_text') {
-              if (subBlocks[ev.index]) { subBlocks[ev.index].body.textContent += ev.content; scroll(); }
-            } else if (ev.type === 'sub_end') {
-              if (subBlocks[ev.index]) subBlocks[ev.index].body.classList.remove('cursor');
-            } else if (ev.type === 'final_start') {
-              const d = document.createElement('div'); d.className = 'final-divider'; d.textContent = '✨ 최종 통합 답변';
-              bwrap.insertBefore(d, bubble); scroll();
             } else if (ev.type === 'sources') { sources = ev.sources;
             } else if (ev.type === 'text') { aiText += ev.content; bubble.textContent = aiText; scroll();
             } else if (ev.type === 'error') { bubble.textContent = ev.content; }

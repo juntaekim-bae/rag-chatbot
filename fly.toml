@@ -10,7 +10,7 @@ primary_region = "nrt"  # 도쿄 (한국에서 가장 가까움)
   CHUNK_SIZE = "800"
   CHUNK_OVERLAP = "150"
   TOP_K = "8"
-  MODEL = "llama-3.3-70b-versatile"
+  MODEL = "claude-sonnet-4-6"
 
 [http_service]
   internal_port = 8000

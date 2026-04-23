@@ -341,69 +341,6 @@
       margin-bottom: 4px;
     }
 
-    /* decomposed questions */
-    .decomposed {
-      font-size: 11px;
-      color: var(--text-muted);
-      margin-bottom: 8px;
-      background: #f0f4ff;
-      border-radius: 6px;
-      padding: 6px 10px;
-    }
-    .decomposed span { font-weight: 600; color: var(--primary); }
-
-    /* sub-answer blocks */
-    .sub-block {
-      background: #f8faff;
-      border: 1px solid #e0e7ff;
-      border-radius: 8px;
-      margin-bottom: 8px;
-      overflow: hidden;
-    }
-    .sub-header {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      padding: 7px 12px;
-      background: #eef2ff;
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--primary);
-    }
-    .sub-header .sub-num {
-      background: var(--primary);
-      color: #fff;
-      border-radius: 50%;
-      width: 18px;
-      height: 18px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 10px;
-      flex-shrink: 0;
-    }
-    .sub-body {
-      padding: 8px 12px;
-      font-size: 13px;
-      line-height: 1.6;
-      white-space: pre-wrap;
-      color: var(--text);
-    }
-    .final-divider {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin: 10px 0 6px;
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--primary);
-    }
-    .final-divider::before, .final-divider::after {
-      content: '';
-      flex: 1;
-      height: 1px;
-      background: #e0e7ff;
-    }
 
     /* image preview in bubble */
     .img-preview {
@@ -967,45 +904,6 @@
               badge.className = 'cached-badge';
               badge.textContent = '⚡ 캐시된 답변';
               bwrap.insertBefore(badge, bubble);
-
-            } else if (ev.type === 'decomposed') {
-              const div = document.createElement('div');
-              div.className = 'decomposed';
-              div.innerHTML = `<span>🔍 질문 분해 (${ev.questions.length}개)</span><br>${ev.questions.map((q,i) => `${i+1}. ${q}`).join('<br>')}`;
-              bwrap.insertBefore(div, bubble);
-
-            } else if (ev.type === 'sub_start') {
-              const block = document.createElement('div');
-              block.className = 'sub-block';
-              const header = document.createElement('div');
-              header.className = 'sub-header';
-              header.innerHTML = `<span class="sub-num">${ev.index + 1}</span>${ev.question}`;
-              const body = document.createElement('div');
-              body.className = 'sub-body';
-              body.classList.add('cursor');
-              block.appendChild(header);
-              block.appendChild(body);
-              bwrap.insertBefore(block, bubble);
-              subBlocks[ev.index] = { header, body };
-              scroll();
-
-            } else if (ev.type === 'sub_text') {
-              const b = subBlocks[ev.index];
-              if (b) {
-                b.body.textContent += ev.content;
-                scroll();
-              }
-
-            } else if (ev.type === 'sub_end') {
-              const b = subBlocks[ev.index];
-              if (b) b.body.classList.remove('cursor');
-
-            } else if (ev.type === 'final_start') {
-              const divider = document.createElement('div');
-              divider.className = 'final-divider';
-              divider.textContent = '✨ 최종 통합 답변';
-              bwrap.insertBefore(divider, bubble);
-              scroll();
 
             } else if (ev.type === 'sources') {
               sources = ev.sources;

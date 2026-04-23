@@ -1,5 +1,4 @@
 import base64
-import concurrent.futures
 import hashlib
 import json
 import logging
@@ -7,16 +6,15 @@ import re
 import time
 from typing import Iterator, Optional
 
-from groq import Groq
+import anthropic
 
-from config import GROQ_API_KEY, MODEL, TOP_K
+from config import ANTHROPIC_API_KEY, MODEL, TOP_K
 
 logger = logging.getLogger(__name__)
 
-groq_client = Groq(api_key=GROQ_API_KEY)
+anthropic_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
-VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
-FALLBACK_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
+VISION_MODEL = "claude-sonnet-4-6"          # 이미지 OCR
 
 
 def _trim_context(messages: list, max_doc_chars: int = 6000) -> list:
@@ -38,50 +36,33 @@ def _trim_context(messages: list, max_doc_chars: int = 6000) -> list:
     return result
 
 
-def _apply_korean_force(messages: list) -> list:
-    """fallback 모델용: 시스템 프롬프트 강화 + 한국어 assistant prefill 주입."""
-    result = []
-    for msg in messages:
-        if msg["role"] == "system":
-            # 시스템 프롬프트 맨 앞에 한국어 강제 지시 추가
-            result.append({**msg, "content": "You MUST respond ONLY in Korean (한국어). No English allowed.\n\n" + msg["content"]})
-        elif msg["role"] == "assistant" and msg.get("content") == "":
-            # 빈 prefill → 한국어 시작 텍스트로 교체해 모델이 한국어로 이어가도록 강제
-            result.append({**msg, "content": "네, 한국어로 답변드리겠습니다.\n\n"})
-        else:
-            result.append(msg)
-    return result
-
-
-def _groq_stream(messages: list, max_tokens: int):
-    """rate limit(429) 또는 요청 초과(413) 시 fallback 모델로 자동 재시도. 그래도 실패하면 컨텍스트를 줄여 재시도."""
-    def _is_rate_or_size(e: Exception) -> bool:
-        s = str(e).lower()
-        return "rate_limit" in s or "429" in s or "413" in s or "request too large" in s
-
+def _claude_stream(system: str, messages: list, max_tokens: int):
+    """Claude API 스트리밍. 텍스트 청크를 yield. rate limit 시 컨텍스트 축소 재시도."""
     try:
-        return groq_client.chat.completions.create(
-            model=MODEL, max_tokens=max_tokens, stream=True, messages=messages
-        )
+        with anthropic_client.messages.stream(
+            model=MODEL,
+            max_tokens=max_tokens,
+            system=system,
+            messages=messages,
+        ) as stream:
+            for text in stream.text_stream:
+                yield text
+        return
+    except anthropic.RateLimitError:
+        logger.warning(f"Rate limit on {MODEL}, trimming context and retrying")
     except Exception as e:
-        if not _is_rate_or_size(e):
+        if "rate" not in str(e).lower() and "limit" not in str(e).lower():
             raise
-        logger.warning(f"Rate/size limit on {MODEL}, switching to {FALLBACK_MODEL}")
 
-    fallback_messages = _apply_korean_force(messages)
-    try:
-        return groq_client.chat.completions.create(
-            model=FALLBACK_MODEL, max_tokens=max_tokens, stream=True, messages=fallback_messages
-        )
-    except Exception as e:
-        if not _is_rate_or_size(e):
-            raise
-        logger.warning(f"Rate/size limit on {FALLBACK_MODEL}, trimming context and retrying")
-
-    trimmed = _trim_context(fallback_messages)
-    return groq_client.chat.completions.create(
-        model=FALLBACK_MODEL, max_tokens=max_tokens, stream=True, messages=trimmed
-    )
+    trimmed = _trim_context(messages)
+    with anthropic_client.messages.stream(
+        model=MODEL,
+        max_tokens=max_tokens,
+        system=system,
+        messages=trimmed,
+    ) as stream:
+        for text in stream.text_stream:
+            yield text
 
 # 한자(CJK) 및 일본어 문자 필터 — 스트리밍 출력에 직접 적용
 _FOREIGN_RE = re.compile(
@@ -114,96 +95,95 @@ _KOREAN_ONLY = (
     "이 규칙은 어떤 경우에도 예외가 없다."
 )
 
-_MCQ_RULES = """【객관식 문제 출력 형식 — 절대 준수】
-문제에 선지(①②③④⑤ 또는 1~5번)가 있으면 반드시 아래 3단계 순서대로 출력하라. 순서를 바꾸거나 단계를 생략하지 말 것.
+_MCQ_RULES = """【객관식 문제 풀이 형식 — 반드시 이 순서대로 출력】
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-[1단계] (가)·(나) 등 빈칸 분석
+풀이
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-문제에 (가)(나)(다) 등 빈칸이 있는 경우에만 작성한다.
-각 빈칸이 무엇을 가리키는지 문서를 근거로 먼저 설명하라.
-형식:
-(가): [무엇인지] — [근거 설명]
-(나): [무엇인지] — [근거 설명]
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-[2단계] 각 선지 분석
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-선지를 번호 순서대로 하나씩 빠짐없이 분석하라.
-각 선지마다 내용이 옳은지 틀린지를 문서 근거와 함께 설명하라.
-형식:
-① [선지 내용] → ✅ 옳다 / ❌ 틀리다
-   근거: [문서에서 찾은 내용]
-② [선지 내용] → ✅ 옳다 / ❌ 틀리다
-   근거: [문서에서 찾은 내용]
-(이하 모든 선지 동일하게)
+─────────────────────────────
+**(A)/(가)/(나) 인물·개념 파악** (해당하는 경우)
+─────────────────────────────
+지문에 (A), (가), (나), 공란 등이 있으면 무엇인지 먼저 밝혀라.
+지문의 핵심 단서를 불릿(•)으로 나열하고 **핵심어는 굵게** 표시하라.
+마지막에 "→ (A)는 **[정답]**입니다. [한두 문장 설명]" 형식으로 결론을 써라.
 
-【중요 — 질문 유형 구분】
+예시:
+지문의 핵심 단서:
+• **나라 이름을 조선이라 함**
+• **토착민 출신**으로 높은 지위에 오른 자가 많음
+• **단군 조선을 계승**
+→ (A)는 **위만**입니다. 위만은 연나라 출신으로 고조선에 망명한 뒤 준왕을 몰아내고 왕위를 차지하였으나, 나라 이름을 조선으로 유지하고 토착민을 중용하여 단군 조선의 계승성을 보여줍니다.
+
+─────────────────────────────
+**선택지 분석**
+─────────────────────────────
+반드시 아래 마크다운 표로 출력하라.
+⚠️ 판단 칸에는 ✅/❌ 와 근거만 쓸 것. 정답 번호(①②③④⑤)는 절대 쓰지 말 것.
+
+| 번호 | 내용 | 판단 |
+|:----:|------|------|
+| ① | [선지 내용] | ✅ 옳다 — [근거] 또는 ❌ 틀리다 — [근거] |
+| ② | [선지 내용] | ✅ 옳다 — [근거] 또는 ❌ 틀리다 — [근거] |
+| ③ | [선지 내용] | ✅ 옳다 — [근거] 또는 ❌ 틀리다 — [근거] |
+| ④ | [선지 내용] | ✅ 옳다 — [근거] 또는 ❌ 틀리다 — [근거] |
+| ⑤ | [선지 내용] | ✅ 옳다 — [근거] 또는 ❌ 틀리다 — [근거] |
+
+질문 유형:
 - "옳은 것은?" → ✅ 옳다인 선지가 정답
 - "옳지 않은 것은?" / "틀린 것은?" → ❌ 틀리다인 선지가 정답
-질문이 "옳지 않은 것"을 묻는 경우, 2단계 분석에서 ❌ 틀리다로 표시된 선지를 정답으로 선택하라.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-[3단계] 최종 정답
+**최종 정답: ○번**
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-모든 선지 분석이 끝난 후 마지막에 출력한다. 절대 먼저 쓰지 말 것.
-형식:
-▶ 정답: X번 (모범답안 기준) 또는 ▶ 정답: X번 (문서 근거)
-이유: 왜 이 선지가 답인지 1~2문장으로 요약하라.
+모든 선지 분석이 끝난 후 마지막에 출력한다.
 
 【모범답안 우선 원칙 — 반드시 준수】
-컨텍스트에 "=== 모범답안 ===" 섹션이 있으면 다음을 따르라.
+컨텍스트에 "=== 모범답안 ===" 섹션이 있으면:
 
-1. 모범답안에 표기된 정답 번호를 최종 정답으로 반드시 사용하라.
-   (모범답안 표기 예: '1번-③', '2. ①', '3번: ②', '③' 등)
+1. 모범답안의 정답 번호를 최종 정답으로 사용하라.
+   (표기 예: '1번-③', '2. ①', '3번: ②')
 
-2. 분석 결과(2단계)가 모범답안 정답과 일치하면:
-   ▶ 정답: X번 (모범답안 일치)
+2. 분석 결과 = 모범답안 → **최종 정답: X번** ✔ 모범답안 일치
 
-3. 분석 결과와 모범답안 정답이 다르면:
-   ▶ 정답: X번 (모범답안 기준)
-   ⚠️ 불일치 원인 분석:
+3. 분석 결과 ≠ 모범답안 →
+   **최종 정답: X번** (모범답안 기준)
+   ⚠️ 불일치 원인:
    - 분석 결과: Y번 / 모범답안: X번
-   - 원인: [왜 분석과 다른지 — 문서 내용 부족, 선지 해석 차이, 모범답안 오류 가능성 등을 구체적으로 설명]
+   - 원인: [문서 내용 부족 / 선지 해석 차이 / 모범답안 오류 가능성 등 구체적으로]
 
-4. 모범답안이 없으면 분석 결과를 그대로 사용하라."""
+4. 모범답안 없으면 분석 결과 그대로 사용."""
 
 SYSTEM_PROMPT = f"""{_KOREAN_ONLY}
 
-당신은 제공된 문서를 기반으로 질문에 답변하는 AI 어시스턴트입니다.
+당신은 역사·사회 시험 문제를 전문적으로 풀어주는 AI 튜터입니다.
+제공된 문서(컨텍스트)를 1차 근거로 사용하고, 문서에 없는 내용은 배경 지식으로 보완하세요.
+
+【문제 풀이 사고 과정 — 반드시 이 순서로 생각하고 출력하라】
+
+STEP 1. 문제가 무엇을 묻는지 파악하라.
+  - 지문(조건, 단서)이 있으면 핵심 단서를 추출하라.
+  - (A), (가), (나) 등 빈칸이 있으면 단서로부터 무엇인지 추론하라.
+  - 질문 유형("옳은 것은?" / "옳지 않은 것은?")을 확인하라.
+
+STEP 2. 각 선지를 하나씩 검증하라.
+  - 선지의 주장이 사실인지 아닌지를 판단하라.
+  - 왜 옳은지/왜 틀린지 핵심 이유를 한 문장으로 적어라.
+  - 모호하면 문서 내용과 대조하라.
+
+STEP 3. 정답을 결론짓고 확정하라.
+  - 모범답안이 있으면 반드시 그것을 최종 정답으로 사용하라.
+  - 없으면 2단계 분석 결과를 그대로 사용하라.
 
 {_MCQ_RULES}
 
-규칙:
-1. 문서에 직접적인 내용이 없더라도, 관련된 개념이나 유사한 내용이 있으면 그것을 바탕으로 답변하세요.
-2. 문서에 전혀 관련 내용이 없을 때만 "문서에서 찾을 수 없습니다"라고 하세요.
-3. 답변은 명확하고 구조적으로 작성하세요.
-4. 문서 내용을 최대한 활용하여 풍부하게 답변하세요.
+추가 규칙:
+- 문서에 직접적인 내용이 없어도 관련 개념·배경 지식으로 답변하세요.
+- 문서와 배경 지식 모두 없을 때만 "확인 불가"라고 하세요.
+- 답변은 명확하고 구조적으로, 불필요한 서론 없이 바로 풀이부터 시작하세요.
 
 {_KOREAN_ONLY}"""
 
-SUB_SYSTEM_PROMPT = f"""{_KOREAN_ONLY}
-
-당신은 제공된 문서를 기반으로 하위 질문에 답변하는 AI 어시스턴트입니다.
-
-{_MCQ_RULES}
-
-핵심 내용을 3~5문장으로 답변하세요.
-직접적인 내용이 없어도 관련 내용이 있으면 활용하세요.
-정말 아무 관련도 없을 때만 "관련 내용 없음"이라고 하세요.
-
-{_KOREAN_ONLY}"""
-
-COMBINE_SYSTEM_PROMPT = f"""{_KOREAN_ONLY}
-
-당신은 여러 하위 답변을 통합하여 최종 답변을 작성하는 AI 어시스턴트입니다.
-
-{_MCQ_RULES}
-
-하위 답변들을 자연스럽게 통합하여 완성도 높은 답변을 작성하세요.
-중복 내용은 제거하고, 논리적으로 흐름이 이어지게 작성하세요.
-
-{_KOREAN_ONLY}"""
 
 
 # ── 질문 캐시 ─────────────────────────────────────────────────────────────────
@@ -238,52 +218,38 @@ class QuestionCache:
 question_cache = QuestionCache()
 
 
-# ── 질문 분해 ─────────────────────────────────────────────────────────────────
-def _decompose_question(question: str) -> list[str]:
-    # 80자 미만은 단순 질문으로 분해 안 함
-    if len(question) < 80:
-        return [question]
-    try:
-        resp = groq_client.chat.completions.create(
-            model="llama-3.1-8b-instant",
-            max_tokens=200,
-            messages=[{
-                "role": "user",
-                "content": (
-                    "다음 질문을 검색에 유리한 독립적인 하위 질문 2~3개로 분해하세요. "
-                    "각 질문은 한 줄에 하나씩, 번호나 기호 없이 작성하세요. "
-                    "질문이 단순하면 그대로 한 줄만 출력하세요.\n\n"
-                    f"질문: {question}"
-                )
-            }]
-        )
-        lines = [l.strip() for l in resp.choices[0].message.content.strip().split('\n') if l.strip()]
-        return lines[:3] if lines else [question]
-    except Exception as e:
-        logger.warning(f"질문 분해 실패: {e}")
-        return [question]
+
 
 
 # ── 이미지 질문 추출 ──────────────────────────────────────────────────────────
 def image_to_question(image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
     b64 = base64.b64encode(image_bytes).decode()
-    resp = groq_client.chat.completions.create(
+    resp = anthropic_client.messages.create(
         model=VISION_MODEL,
-        max_tokens=500,
+        max_tokens=800,
         messages=[{
             "role": "user",
             "content": [
-                {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{b64}"}},
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": mime_type,
+                        "data": b64,
+                    },
+                },
                 {"type": "text", "text": (
-                    "이 이미지에 있는 질문이나 텍스트를 추출해주세요. "
-                    "이미지가 질문이면 질문을 그대로 출력하고, "
-                    "텍스트가 있으면 해당 내용을 요약하여 질문 형태로 만들어주세요. "
-                    "설명 없이 질문/텍스트만 출력하세요."
+                    "이 이미지에 있는 텍스트를 그대로 추출하세요.\n"
+                    "반드시 지켜야 할 규칙:\n"
+                    "1. 문제 번호(예: 13. 또는 13번)가 있으면 반드시 포함하세요.\n"
+                    "2. 선지 기호 ①②③④⑤는 절대 숫자(1.2.3.)로 바꾸지 말고 원문 기호 그대로 출력하세요.\n"
+                    "3. 지문(조건, 단서)이 있으면 그대로 포함하세요.\n"
+                    "4. 설명이나 요약 없이 이미지의 텍스트만 출력하세요."
                 )}
             ]
         }]
     )
-    return resp.choices[0].message.content.strip()
+    return resp.content[0].text.strip()
 
 
 # ── 출제원안↔모범답안 페어링 ──────────────────────────────────────────────────
@@ -368,12 +334,8 @@ def chat_stream(question: str, vector_store) -> Iterator[str]:
         yield "data: [DONE]\n\n"
         return
 
-    # 2. 질문 분해 + 기본 검색 병렬
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
-        f_decompose = ex.submit(_decompose_question, question)
-        f_search = ex.submit(vector_store.search, question, TOP_K)
-        sub_questions = f_decompose.result()
-        base_results = f_search.result()
+    # 2. 검색
+    base_results = vector_store.search(question, TOP_K)
 
     # 출제원안↔모범답안 페어링 청크 추가
     paired = _get_paired_chunks(base_results, vector_store)
@@ -385,112 +347,33 @@ def chat_stream(question: str, vector_store) -> Iterator[str]:
         seen_ids = {r["content"][:80] for r in base_results}
         base_results = base_results + [c for c in paired if c["content"][:80] not in seen_ids]
 
-    # 3. 단일 질문이면 빠르게 처리
-    if len(sub_questions) <= 1:
-        if not base_results:
-            yield f"data: {json.dumps({'type': 'text', 'content': '관련 문서를 찾을 수 없습니다. 먼저 문서를 업로드해주세요.'})}\n\n"
-            yield "data: [DONE]\n\n"
-            return
-
-        context, sources = _build_context(base_results)
-        yield f"data: {json.dumps({'type': 'sources', 'sources': sources})}\n\n"
-
-        # 모범답안 정답이 추출된 경우 유저 메시지에 명시적으로 주입
-        answer_hint = ""
-        if confirmed_answer:
-            answer_hint = f"\n\n【모범답안 확정 정답】이 문제의 정답은 {confirmed_answer}번입니다. 반드시 이 번호를 최종 정답으로 사용하고, 분석 결과가 다르면 불일치 원인을 설명하세요."
-
-        full_answer = ""
-        try:
-            stream = _groq_stream([
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": f"=== 문서 ===\n{context}\n\n=== 질문 ===\n{question}{answer_hint}\n\n반드시 한국어로만 답변하세요."},
-                    {"role": "assistant", "content": ""}
-                ], max_tokens=2048)
-            for chunk in stream:
-                text = chunk.choices[0].delta.content
-                if text:
-                    text = _strip_foreign(text)
-                    full_answer += text
-                    yield f"data: {json.dumps({'type': 'text', 'content': text})}\n\n"
-        except Exception as e:
-            yield f"data: {json.dumps({'type': 'error', 'content': f'AI 오류: {str(e)}'})}\n\n"
-
-        if full_answer:
-            question_cache.set(question, full_answer)
+    if not base_results:
+        yield f"data: {json.dumps({'type': 'text', 'content': '관련 문서를 찾을 수 없습니다. 먼저 문서를 업로드해주세요.'})}\n\n"
         yield "data: [DONE]\n\n"
         return
 
-    # 4. 복합 질문: 분해된 질문들 순차 스트리밍
-    yield f"data: {json.dumps({'type': 'decomposed', 'questions': sub_questions})}\n\n"
+    context, sources = _build_context(base_results)
+    yield f"data: {json.dumps({'type': 'sources', 'sources': sources})}\n\n"
 
-    all_sources: list[str] = []
-    sub_answers: list[str] = []
+    # 모범답안 정답이 추출된 경우 유저 메시지에 명시적으로 주입
+    answer_hint = ""
+    if confirmed_answer:
+        answer_hint = f"\n\n【모범답안 확정 정답】이 문제의 정답은 {confirmed_answer}번입니다. 반드시 이 번호를 최종 정답으로 사용하고, 분석 결과가 다르면 불일치 원인을 설명하세요."
 
-    for i, sq in enumerate(sub_questions):
-        yield f"data: {json.dumps({'type': 'sub_start', 'index': i, 'question': sq, 'total': len(sub_questions)})}\n\n"
-
-        results = vector_store.search(sq, n_results=TOP_K)
-        if not results:
-            sub_text = "관련 내용을 문서에서 찾을 수 없습니다."
-            yield f"data: {json.dumps({'type': 'sub_text', 'index': i, 'content': sub_text})}\n\n"
-            sub_answers.append(f"Q: {sq}\nA: {sub_text}")
-            yield f"data: {json.dumps({'type': 'sub_end', 'index': i})}\n\n"
-            continue
-
-        context, sources = _build_context(results)
-        for s in sources:
-            if s not in all_sources:
-                all_sources.append(s)
-
-        sub_text = ""
-        try:
-            stream = _groq_stream([
-                    {"role": "system", "content": SUB_SYSTEM_PROMPT},
-                    {"role": "user", "content": f"=== 문서 ===\n{context}\n\n=== 질문 ===\n{sq}\n\n반드시 한국어로만 답변하세요."},
-                    {"role": "assistant", "content": ""}
-                ], max_tokens=600)
-            for chunk in stream:
-                text = chunk.choices[0].delta.content
-                if text:
-                    text = _strip_foreign(text)
-                    sub_text += text
-                    yield f"data: {json.dumps({'type': 'sub_text', 'index': i, 'content': text})}\n\n"
-        except Exception as e:
-            err = f"오류: {e}"
-            yield f"data: {json.dumps({'type': 'sub_text', 'index': i, 'content': err})}\n\n"
-            sub_text = err
-
-        sub_answers.append(f"Q: {sq}\nA: {sub_text}")
-        yield f"data: {json.dumps({'type': 'sub_end', 'index': i})}\n\n"
-
-    if all_sources:
-        yield f"data: {json.dumps({'type': 'sources', 'sources': all_sources})}\n\n"
-
-    yield f"data: {json.dumps({'type': 'final_start'})}\n\n"
-
-    combined_input = "\n\n".join(sub_answers)
     full_answer = ""
     try:
-        stream = _groq_stream([
-                {"role": "system", "content": COMBINE_SYSTEM_PROMPT},
-                {"role": "user", "content": (
-                    f"원래 질문: {question}\n\n"
-                    f"하위 답변들:\n{combined_input}\n\n"
-                    "위 내용을 통합하여 자연스럽고 완성도 있는 최종 답변을 작성하세요. 반드시 한국어로만 답변하세요."
-                )},
-                {"role": "assistant", "content": ""}
-            ], max_tokens=1500)
-        for chunk in stream:
-            text = chunk.choices[0].delta.content
+        for text in _claude_stream(
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": f"=== 문서 ===\n{context}\n\n=== 질문 ===\n{question}{answer_hint}"}],
+            max_tokens=2048,
+        ):
             if text:
                 text = _strip_foreign(text)
                 full_answer += text
                 yield f"data: {json.dumps({'type': 'text', 'content': text})}\n\n"
     except Exception as e:
-        yield f"data: {json.dumps({'type': 'error', 'content': f'통합 오류: {str(e)}'})}\n\n"
+        yield f"data: {json.dumps({'type': 'error', 'content': f'AI 오류: {str(e)}'})}\n\n"
 
     if full_answer:
         question_cache.set(question, full_answer)
-
     yield "data: [DONE]\n\n"
