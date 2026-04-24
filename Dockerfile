@@ -19,9 +19,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ghostscript \
     && rm -rf /var/lib/apt/lists/*
 
-# sentence-transformers 모델 미리 다운로드 (빌드 시 캐시)
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')"
-
 # 소스 복사
 COPY . .
 
