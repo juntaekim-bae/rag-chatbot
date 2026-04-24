@@ -87,6 +87,12 @@
     .sync-file-item.skipped .fi-icon { color: #a0aec0; }
     .sync-file-item.skipped .fi-name { color: #a0aec0; }
     .sync-elapsed { padding: 5px 12px; font-size: 10px; color: #718096; text-align: right; background: #f9fff9; }
+    .sync-file-item .fi-del { background:none;border:none;cursor:pointer;color:#a0aec0;font-size:12px;padding:1px 5px;border-radius:3px;flex-shrink:0; }
+    .sync-file-item .fi-del:hover { color:#e53e3e;background:#fff5f5; }
+    .sync-panel-actions { padding:8px 12px;border-top:1px solid #c6f6d5;background:#f9fff9;display:none;gap:6px; }
+    .spact-btn { flex:1;padding:6px 4px;font-size:11px;font-weight:600;border-radius:6px;cursor:pointer;border:1px solid; }
+    .spact-btn.re { background:#ebf8ff;color:#2b6cb0;border-color:#bee3f8; }
+    .spact-btn.del { background:#fff5f5;color:#c53030;border-color:#fc8181; }
 
     /* 문서 목록 */
     .doc-section { flex: 1; overflow-y: auto; padding: 0 14px 14px; }
@@ -211,6 +217,10 @@
     <div class="sync-current" id="sync-current">파일 목록 가져오는 중...</div>
     <div class="sync-file-list" id="sync-file-list"></div>
     <div class="sync-elapsed" id="sync-elapsed"></div>
+    <div class="sync-panel-actions" id="sync-panel-actions" style="display:none">
+      <button class="spact-btn re" onclick="forceResync()">🔄 강제 재동기화</button>
+      <button class="spact-btn del" onclick="clearAllDocs()">🗑 전체 삭제</button>
+    </div>
   </div>
 
   <!-- 문서 목록 -->
@@ -390,7 +400,7 @@
     document.getElementById('drive-body').classList.toggle('open');
   }
 
-  const ICON = { done: '✓', error: '✕', processing: '⟳', skipped: '–' };
+  const ICON = { done: '✓', error: '✕', processing: '⟳', skipped: '–', pending: '…', downloaded: '↓', parsing: '⟳', parsed: '◎' };
 
   function updateSyncPanel(s, elapsed) {
     const pct = s.total > 0 ? Math.round((s.progress / s.total) * 100) : (s.running ? 5 : 0);
@@ -411,15 +421,23 @@
       document.getElementById('sync-title').textContent = `동기화 완료 — ${done}개 추가, ${skip}개 건너뜀`;
       document.querySelector('.sync-panel-header').style.background = err > 0 ? '#c05621' : '#276749';
       document.querySelector('.spin').style.display = 'none';
+      document.getElementById('sync-panel-actions').style.display = 'flex';
     }
 
     const list = document.getElementById('sync-file-list');
     if (s.files_detail && s.files_detail.length > 0) {
-      list.innerHTML = [...s.files_detail].reverse().map(f => `
-        <div class="sync-file-item ${f.status}">
-          <i class="fi-icon">${ICON[f.status] || '?'}</i>
-          <span class="fi-name" title="${f.name}">${f.name}</span>
-        </div>`).join('');
+      list.innerHTML = [...s.files_detail].reverse().map(f => {
+        const canDel = s.done && (f.status === 'done' || f.status === 'skipped');
+        const delBtn = canDel
+          ? `<button class="fi-del" onclick="delSyncFile('${f.name.replace(/'/g,"\\'")}',this)" title="삭제">✕</button>`
+          : '';
+        return `
+          <div class="sync-file-item ${f.status}">
+            <i class="fi-icon">${ICON[f.status] || '?'}</i>
+            <span class="fi-name" title="${f.name}">${f.name}</span>
+            ${delBtn}
+          </div>`;
+      }).join('');
     }
   }
 
@@ -452,6 +470,7 @@
     document.getElementById('sync-current').textContent = '파일 목록 가져오는 중...';
     document.getElementById('sync-file-list').innerHTML = '';
     document.getElementById('sync-elapsed').textContent = '';
+    document.getElementById('sync-panel-actions').style.display = 'none';
     document.querySelector('.sync-panel-header').style.background = '#276749';
     document.querySelector('.spin').style.display = '';
 
@@ -555,6 +574,24 @@
 
   document.getElementById('question').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); } });
   document.getElementById('question').addEventListener('input', function () { this.style.height = 'auto'; this.style.height = Math.min(this.scrollHeight, 120) + 'px'; });
+
+  async function delSyncFile(filename, btn) {
+    if (!confirm(`"${filename}" 삭제?`)) return;
+    await fetch(`${API}/api/documents/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+    toast(`${filename} 삭제됨`, 'success');
+    btn.closest('.sync-file-item').remove();
+    await loadDocs();
+  }
+
+  async function forceResync() {
+    const url = document.getElementById('drive-url').value.trim();
+    if (!url) { toast('Drive 링크가 없습니다', 'error'); return; }
+    if (!confirm('모든 문서를 삭제하고 Drive에서 다시 동기화할까요?')) return;
+    await fetch(`${API}/api/documents`, { method: 'DELETE' });
+    toast('전체 문서 삭제됨. 재동기화 시작...', 'success');
+    await loadDocs();
+    await syncDrive();
+  }
 
   setInterval(loadDocs, 30000);
 
