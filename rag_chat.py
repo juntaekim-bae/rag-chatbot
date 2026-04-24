@@ -38,6 +38,7 @@ def _trim_context(messages: list, max_doc_chars: int = 6000) -> list:
 
 def _claude_stream(system: str, messages: list, max_tokens: int):
     """Claude API 스트리밍. 텍스트 청크를 yield. rate limit 시 컨텍스트 축소 재시도."""
+    import cost_tracker
     try:
         with anthropic_client.messages.stream(
             model=MODEL,
@@ -47,6 +48,11 @@ def _claude_stream(system: str, messages: list, max_tokens: int):
         ) as stream:
             for text in stream.text_stream:
                 yield text
+            try:
+                msg = stream.get_final_message()
+                cost_tracker.record_claude(msg.usage.input_tokens, msg.usage.output_tokens)
+            except Exception:
+                pass
         return
     except anthropic.RateLimitError:
         logger.warning(f"Rate limit on {MODEL}, trimming context and retrying")
@@ -63,6 +69,11 @@ def _claude_stream(system: str, messages: list, max_tokens: int):
     ) as stream:
         for text in stream.text_stream:
             yield text
+        try:
+            msg = stream.get_final_message()
+            cost_tracker.record_claude(msg.usage.input_tokens, msg.usage.output_tokens)
+        except Exception:
+            pass
 
 # 한자(CJK) 및 일본어 문자 필터 — 스트리밍 출력에 직접 적용
 _FOREIGN_RE = re.compile(
@@ -224,6 +235,7 @@ question_cache = QuestionCache()
 # ── 이미지 질문 추출 ──────────────────────────────────────────────────────────
 def image_to_question(image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
     b64 = base64.b64encode(image_bytes).decode()
+    import cost_tracker
     resp = anthropic_client.messages.create(
         model=VISION_MODEL,
         max_tokens=800,
@@ -249,6 +261,10 @@ def image_to_question(image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
             ]
         }]
     )
+    try:
+        cost_tracker.record_claude(resp.usage.input_tokens, resp.usage.output_tokens)
+    except Exception:
+        pass
     return resp.content[0].text.strip()
 
 

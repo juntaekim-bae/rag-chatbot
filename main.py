@@ -12,7 +12,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
-from config import ACCESS_PASSWORD, ADMIN_PASSWORD, DOCUMENTS_DIR, MODEL
+import cost_tracker
+from config import ACCESS_PASSWORD, ADMIN_PASSWORD, CHROMA_DIR, DOCUMENTS_DIR, MODEL
 from document_processor import SUPPORTED_EXTENSIONS, process_document
 from rag_chat import chat_stream, image_to_question, question_cache
 from vector_store import vector_store
@@ -83,6 +84,7 @@ def _index_existing_documents():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    cost_tracker.init(CHROMA_DIR.parent / "costs.json")
     _index_existing_documents()
     logger.info("서버 준비 완료 (인덱싱은 백그라운드 진행 중)")
     yield
@@ -312,6 +314,18 @@ async def cache_stats():
 async def clear_cache():
     question_cache._cache.clear()
     return {"message": "캐시 초기화 완료"}
+
+
+# ── 비용 추적 ─────────────────────────────────────────────────────────────────
+@app.get("/api/admin/costs")
+async def get_costs():
+    return cost_tracker.get_summary()
+
+
+@app.delete("/api/admin/costs")
+async def reset_costs():
+    cost_tracker.reset()
+    return {"message": "비용 초기화 완료"}
 
 
 # ── 헬스체크 ──────────────────────────────────────────────────────────────────

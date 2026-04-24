@@ -70,17 +70,27 @@ class VoyageEmbeddingFunction:
 
     def __call__(self, input: list[str]) -> list[list[float]]:
         """문서 인덱싱용 — input_type='document'"""
+        import cost_tracker
         all_embeddings: list[list[float]] = []
         batch_size = 128  # Voyage API 배치 한도
         for i in range(0, len(input), batch_size):
             batch = list(input[i : i + batch_size])
             result = self._client.embed(batch, model=self._model, input_type="document")
             all_embeddings.extend(result.embeddings)
+            try:
+                cost_tracker.record_voyage(result.total_tokens)
+            except Exception:
+                pass
         return all_embeddings
 
     def embed_query(self, query: str) -> list[float]:
         """검색 쿼리용 — input_type='query' (document 모드와 구분해 정밀도 향상)"""
+        import cost_tracker
         result = self._client.embed([query], model=self._model, input_type="query")
+        try:
+            cost_tracker.record_voyage(result.total_tokens)
+        except Exception:
+            pass
         return result.embeddings[0]
 
 

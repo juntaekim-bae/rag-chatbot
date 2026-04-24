@@ -76,7 +76,7 @@
     .sync-stat .sv { font-size: 16px; font-weight: 700; color: #276749; }
     .sync-stat .sl { font-size: 10px; color: #718096; margin-top: 1px; }
     .sync-current { padding: 7px 12px; font-size: 11px; color: #2d3748; background: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-bottom: 1px solid #c6f6d5; min-height: 30px; }
-    .sync-file-list { }
+    .sync-file-list { max-height: 150px; overflow-y: auto; }
     .sync-file-item { display: flex; align-items: center; gap: 6px; padding: 4px 12px; font-size: 11px; border-bottom: 1px solid #e6ffed; }
     .sync-file-item:last-child { border-bottom: none; }
     .sync-file-item .fi-icon { width: 14px; text-align: center; flex-shrink: 0; font-style: normal; }
@@ -94,11 +94,8 @@
     .spact-btn.re { background:#ebf8ff;color:#2b6cb0;border-color:#bee3f8; }
     .spact-btn.del { background:#fff5f5;color:#c53030;border-color:#fc8181; }
 
-    /* 스크롤 가능한 사이드바 본문 */
-    .sidebar-scroll { flex: 1; overflow-y: auto; display: flex; flex-direction: column; }
-
     /* 문서 목록 */
-    .doc-section { padding: 10px 14px 14px; }
+    .doc-section { flex: 1; overflow-y: auto; padding: 10px 14px 14px; min-height: 100px; }
     .doc-section h2 { font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 8px; }
     .doc-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); margin-bottom: 6px; background: var(--bg); }
     .doc-icon { font-size: 16px; flex-shrink: 0; }
@@ -109,8 +106,23 @@
     .doc-del:hover { color: #e53e3e; background: #fff5f5; }
     .empty-docs { font-size: 13px; color: var(--text-muted); text-align: center; padding: 20px 0; }
 
+    /* 비용 섹션 */
+    .cost-section { margin: 0 14px 10px; border: 1px solid #e9d8fd; border-radius: var(--radius); background: #faf5ff; overflow: hidden; flex-shrink: 0; }
+    .cost-header { display: flex; align-items: center; justify-content: space-between; padding: 9px 12px; background: #553c9a; color: #fff; }
+    .cost-header span { font-size: 12px; font-weight: 700; }
+    .cost-header button { background: rgba(255,255,255,.2); border: none; color: #fff; font-size: 10px; padding: 2px 7px; border-radius: 4px; cursor: pointer; }
+    .cost-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: #d6bcfa; }
+    .cost-cell { background: #faf5ff; padding: 7px 10px; }
+    .cost-cell .cc-label { font-size: 10px; color: #553c9a; font-weight: 600; margin-bottom: 2px; }
+    .cost-cell .cc-val { font-size: 13px; font-weight: 700; color: #2d3748; }
+    .cost-cell .cc-sub { font-size: 10px; color: #718096; }
+    .cost-total { padding: 7px 12px; background: #553c9a; color: #fff; display: flex; align-items: center; justify-content: space-between; }
+    .cost-total .ct-label { font-size: 11px; opacity: .8; }
+    .cost-total .ct-val { font-size: 15px; font-weight: 700; }
+    .cost-since { padding: 4px 12px; font-size: 10px; color: #718096; background: #f3e8ff; text-align: right; }
+
     /* 채팅 */
-    .chat-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+    .chat-area { flex: 0 0 420px; display: flex; flex-direction: column; overflow: hidden; border-left: 1px solid var(--border); }
     .chat-header { padding: 16px 20px; background: var(--surface); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; }
     .chat-header .dot { width: 10px; height: 10px; border-radius: 50%; background: #48bb78; }
     .chat-header h2 { font-size: 16px; font-weight: 600; }
@@ -190,7 +202,31 @@
     <div class="admin-msg" id="admin-msg"></div>
   </div>
 
-  <div class="sidebar-scroll">
+  <!-- API 비용 -->
+  <div class="cost-section">
+    <div class="cost-header">
+      <span>💰 API 사용 비용</span>
+      <button onclick="resetCosts()">초기화</button>
+    </div>
+    <div class="cost-grid">
+      <div class="cost-cell">
+        <div class="cc-label">Claude API</div>
+        <div class="cc-val" id="cost-claude">$0.0000</div>
+        <div class="cc-sub" id="cost-claude-tokens">-</div>
+      </div>
+      <div class="cost-cell">
+        <div class="cc-label">Voyage AI</div>
+        <div class="cc-val" id="cost-voyage">$0.0000</div>
+        <div class="cc-sub" id="cost-voyage-tokens">-</div>
+      </div>
+    </div>
+    <div class="cost-total">
+      <span class="ct-label">합계</span>
+      <span class="ct-val" id="cost-total">$0.0000</span>
+    </div>
+    <div class="cost-since" id="cost-since">-</div>
+  </div>
+
   <!-- Google Drive -->
   <div class="drive-section">
     <div class="drive-header" id="drive-toggle" onclick="toggleDrive()">
@@ -235,7 +271,6 @@
     </div>
     <div id="doc-list"><div class="empty-docs">문서 없음</div></div>
   </div>
-  </div><!-- /sidebar-scroll -->
 </aside>
 
 <!-- 채팅 -->
@@ -284,6 +319,7 @@
       loadDocs();
       loadDriveConfig();
       loadLockStatus();
+      loadCosts();
     } catch { errEl.textContent = '서버 오류.'; }
   }
   document.getElementById('login-pw').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
@@ -580,6 +616,36 @@
   document.getElementById('question').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); } });
   document.getElementById('question').addEventListener('input', function () { this.style.height = 'auto'; this.style.height = Math.min(this.scrollHeight, 120) + 'px'; });
 
+  function fmtTokens(n) {
+    if (n >= 1_000_000) return (n / 1_000_000).toFixed(2) + 'M 토큰';
+    if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K 토큰';
+    return n + ' 토큰';
+  }
+
+  async function loadCosts() {
+    try {
+      const d = await (await fetch(`${API}/api/admin/costs`)).json();
+      document.getElementById('cost-claude').textContent = '$' + d.claude.cost_usd.toFixed(4);
+      document.getElementById('cost-claude-tokens').textContent =
+        `입력 ${fmtTokens(d.claude.input_tokens)} / 출력 ${fmtTokens(d.claude.output_tokens)}`;
+      document.getElementById('cost-voyage').textContent = '$' + d.voyage.cost_usd.toFixed(4);
+      document.getElementById('cost-voyage-tokens').textContent = fmtTokens(d.voyage.tokens);
+      document.getElementById('cost-total').textContent = '$' + d.total_cost_usd.toFixed(4);
+      if (d.since) {
+        const dt = new Date(d.since);
+        document.getElementById('cost-since').textContent =
+          '집계 시작: ' + dt.toLocaleDateString('ko-KR') + ' ' + dt.toLocaleTimeString('ko-KR', {hour:'2-digit', minute:'2-digit'});
+      }
+    } catch {}
+  }
+
+  async function resetCosts() {
+    if (!confirm('비용 집계를 초기화할까요?')) return;
+    await fetch(`${API}/api/admin/costs`, { method: 'DELETE' });
+    toast('비용 초기화됨', 'success');
+    await loadCosts();
+  }
+
   async function delSyncFile(filename, btn) {
     if (!confirm(`"${filename}" 삭제?`)) return;
     await fetch(`${API}/api/documents/${encodeURIComponent(filename)}`, { method: 'DELETE' });
@@ -599,6 +665,7 @@
   }
 
   setInterval(loadDocs, 30000);
+  setInterval(loadCosts, 20000);
 
   async function loadActiveUsers() {
     try {
