@@ -93,6 +93,9 @@
     .pw-row input:focus { border-color: var(--primary); }
     .pw-row button { padding: 8px 12px; border: none; border-radius: 7px; font-size: 12px; font-weight: 600; cursor: pointer; }
     .pw-row .pw-save { background: var(--primary); color: #fff; }
+    .lock-btn { width: 100%; margin-top: 8px; padding: 9px; border: none; border-radius: 7px; font-size: 12px; font-weight: 700; cursor: pointer; background: var(--red); color: #fff; transition: background .2s; }
+    .lock-btn.locked { background: var(--green); }
+    .lock-btn:hover { opacity: .88; }
     .settings-msg { font-size: 11px; color: var(--green); margin-top: 6px; min-height: 14px; }
 
     /* ── Drive 섹션 ─────────────────────────────────────── */
@@ -309,6 +312,7 @@
             <input type="password" id="new-pw" placeholder="새 접속 비밀번호" />
             <button class="pw-save" onclick="changePassword()">변경</button>
           </div>
+          <button class="lock-btn" id="lock-btn-panel" onclick="toggleLock()">🔒 서비스 잠금</button>
           <div class="settings-msg" id="admin-msg"></div>
         </div>
       </div>
@@ -440,9 +444,11 @@
     } catch {}
   }
   function updateLockBtn() {
-    const btn = document.getElementById('lock-btn');
-    btn.textContent = _isLocked ? '🔓 잠금 해제' : '🔒 서비스 잠금';
-    btn.classList.toggle('locked', _isLocked);
+    const hdrBtn = document.getElementById('lock-btn');
+    const panelBtn = document.getElementById('lock-btn-panel');
+    const label = _isLocked ? '🔓 서비스 잠금 해제' : '🔒 서비스 잠금';
+    if (hdrBtn) { hdrBtn.textContent = _isLocked ? '🔓 잠금 해제' : '🔒 서비스 잠금'; hdrBtn.classList.toggle('locked', _isLocked); }
+    if (panelBtn) { panelBtn.textContent = label; panelBtn.classList.toggle('locked', _isLocked); }
   }
   async function toggleLock() {
     if (_isLocked) {
