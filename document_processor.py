@@ -231,30 +231,34 @@ def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVE
     return merged if merged else [text]
 
 
+def prepare_chunks(filepath: Path) -> tuple[list[str], list[dict], list[str]]:
+    """청크 준비만 하고 임베딩/저장은 하지 않음 (배치 처리용)"""
+    filename = filepath.name
+    text = read_document(filepath)
+    if not text.strip():
+        logger.warning(f"빈 문서: {filename}")
+        return [], [], []
+
+    chunks = chunk_text(text)
+    ids: list[str] = []
+    metadatas: list[dict] = []
+    for i, chunk in enumerate(chunks):
+        chunk_id = hashlib.md5(f"{filename}_{i}_{chunk[:30]}".encode()).hexdigest()
+        ids.append(chunk_id)
+        metadatas.append({"filename": filename, "chunk_index": i, "total_chunks": len(chunks)})
+    logger.info(f"{filename}: {len(chunks)}개 청크 준비 완료")
+    return chunks, metadatas, ids
+
+
 def process_document(filepath: Path, vector_store) -> int:
     filename = filepath.name
     logger.info(f"Processing {filename}...")
 
-    text = read_document(filepath)
-    if not text.strip():
-        logger.warning(f"빈 문서: {filename}")
+    chunks, metadatas, ids = prepare_chunks(filepath)
+    if not chunks:
         return 0
 
-    chunks = chunk_text(text)
     vector_store.delete_document(filename)
-
-    ids, metadatas = [], []
-    for i, chunk in enumerate(chunks):
-        chunk_id = hashlib.md5(f"{filename}_{i}_{chunk[:30]}".encode()).hexdigest()
-        ids.append(chunk_id)
-        metadatas.append(
-            {
-                "filename": filename,
-                "chunk_index": i,
-                "total_chunks": len(chunks),
-            }
-        )
-
     vector_store.add_documents(chunks, metadatas, ids)
     logger.info(f"{filename}: {len(chunks)}개 청크 인덱싱 완료")
     return len(chunks)
