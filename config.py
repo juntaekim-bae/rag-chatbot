@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+VOYAGE_API_KEY = os.getenv("VOYAGE_API_KEY", "")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 ACCESS_PASSWORD = os.getenv("ACCESS_PASSWORD", "0000")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "20220405")

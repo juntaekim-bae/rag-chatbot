@@ -3,9 +3,8 @@ import re
 from typing import Any
 
 import chromadb
-from chromadb.utils import embedding_functions
 
-from config import CHROMA_DIR, COLLECTION_NAME
+from config import CHROMA_DIR, COLLECTION_NAME, VOYAGE_API_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -37,33 +36,58 @@ def _extract_nouns(query: str) -> list[str]:
     for token in tokens:
         if not token:
             continue
-        # 불용어 전체 매칭
         if token in _STOPWORDS:
             continue
-        # 조사 제거
         stripped = token
         for p in _PARTICLES:
             if stripped.endswith(p) and len(stripped) - len(p) >= 2:
                 stripped = stripped[:-len(p)]
                 break
-        # 제거 후 불용어 재확인
         if stripped in _STOPWORDS:
             continue
-        # 최소 2글자 이상인 경우만 키워드로 사용
         if len(stripped) >= 2:
             result.append(stripped)
     return result
 
-# 한국어 포함 다국어 지원 모델
-EMBED_MODEL = "paraphrase-multilingual-MiniLM-L12-v2"
+
+# Anthropic 공식 파트너 임베딩 모델 (한국어 포함 다국어)
+EMBED_MODEL = "voyage-multilingual-2"
+
+
+class VoyageEmbeddingFunction:
+    """Voyage AI 임베딩 — document/query 모드 분리로 검색 품질 향상."""
+
+    def __init__(self, model_name: str, api_key: str):
+        if not api_key:
+            raise ValueError(
+                "VOYAGE_API_KEY가 설정되지 않았습니다. "
+                ".env 파일에 VOYAGE_API_KEY=<키> 를 추가하세요. "
+                "키 발급: https://www.voyageai.com"
+            )
+        import voyageai
+        self._client = voyageai.Client(api_key=api_key)
+        self._model = model_name
+
+    def __call__(self, input: list[str]) -> list[list[float]]:
+        """문서 인덱싱용 — input_type='document'"""
+        all_embeddings: list[list[float]] = []
+        batch_size = 128  # Voyage API 배치 한도
+        for i in range(0, len(input), batch_size):
+            batch = list(input[i : i + batch_size])
+            result = self._client.embed(batch, model=self._model, input_type="document")
+            all_embeddings.extend(result.embeddings)
+        return all_embeddings
+
+    def embed_query(self, query: str) -> list[float]:
+        """검색 쿼리용 — input_type='query' (document 모드와 구분해 정밀도 향상)"""
+        result = self._client.embed([query], model=self._model, input_type="query")
+        return result.embeddings[0]
 
 
 class VectorStore:
     def __init__(self):
         self.client = chromadb.PersistentClient(path=str(CHROMA_DIR))
-        self.ef = embedding_functions.SentenceTransformerEmbeddingFunction(
-            model_name=EMBED_MODEL
-        )
+        self.ef = VoyageEmbeddingFunction(model_name=EMBED_MODEL, api_key=VOYAGE_API_KEY)
         # 임베딩 모델이 변경된 경우 기존 컬렉션 삭제 후 재생성
         try:
             col = self.client.get_collection(name=COLLECTION_NAME)
@@ -94,9 +118,10 @@ class VectorStore:
         query = normalize_korean(query)
         fetch = min(n_results * 3, total)
 
-        # 1. 벡터 유사도 검색
+        # 1. 벡터 유사도 검색 — query 전용 임베딩 사용
+        query_embedding = self.ef.embed_query(query)
         results = self.collection.query(
-            query_texts=[query],
+            query_embeddings=[query_embedding],
             n_results=fetch,
         )
         vector_docs: dict[str, dict] = {}

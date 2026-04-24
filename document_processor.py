@@ -155,7 +155,6 @@ def normalize_korean(text: str) -> str:
 
 def split_sentences(text: str) -> list[str]:
     """한국어 문장 분리 — 문장 끝(다/요/까/죠/네 + 마침표/물음표/느낌표) 기준"""
-    # 문장 경계: 한국어 종결어미 뒤 마침표류, 또는 줄바꿈
     pattern = r'(?<=[다요까죠네])[.!?]\s+|(?<=[.!?])\s+(?=[가-힣A-Z])'
     parts = re.split(pattern, text)
     sentences = []
@@ -166,19 +165,53 @@ def split_sentences(text: str) -> list[str]:
     return sentences if sentences else [text]
 
 
+# ── 시험 문제 단위 청킹 ───────────────────────────────────────────────────────
+# 줄 앞에 오는 문제 번호 패턴: "1.", "13번", "5)" 등
+_QNUM_RE = re.compile(r'(?m)^\s*(\d{1,3})\s*[.번\)]\s')
+_CHOICE_RE = re.compile(r'[①②③④⑤]')
+
+
+def _is_exam_doc(text: str) -> bool:
+    """시험지 형식 감지: 문제 번호 3개 이상 + 원문자 선지가 문제당 평균 2개 이상"""
+    q_count = len(_QNUM_RE.findall(text))
+    c_count = len(_CHOICE_RE.findall(text))
+    return q_count >= 3 and c_count >= q_count * 2
+
+
+def _chunk_exam(text: str) -> list[str]:
+    """문제 번호 경계로 청킹 — 각 문제(지문+선지)를 하나의 청크로 유지"""
+    matches = list(_QNUM_RE.finditer(text))
+    if not matches:
+        return []
+    chunks = []
+    for i, m in enumerate(matches):
+        start = m.start()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        chunk = text[start:end].strip()
+        if chunk:
+            chunks.append(chunk)
+    return chunks
+
+
 def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> list[str]:
-    """문장 경계를 지키면서 청크 분할"""
+    """시험 문서는 문제 단위로, 일반 문서는 문장 경계 청크 분할"""
     text = normalize_korean(text)
+
+    # 시험지 형식이면 문제 단위로 청킹
+    if _is_exam_doc(text):
+        exam_chunks = _chunk_exam(text)
+        if exam_chunks:
+            return exam_chunks
+
+    # 일반 문서: 문장 경계 청킹
     sentences = split_sentences(text)
 
     chunks = []
     current = ""
 
     for sent in sentences:
-        # 현재 청크에 문장 추가 시 크기 초과
         if current and len(current) + len(sent) + 1 > chunk_size:
             chunks.append(current.strip())
-            # 오버랩: 현재 청크 끝부분을 다음 청크 시작으로
             overlap_text = current[-overlap:] if len(current) > overlap else current
             current = overlap_text + " " + sent
         else:
