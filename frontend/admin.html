@@ -72,20 +72,19 @@
     /* ── 2열 레이아웃 ──────────────────────────────────── */
     .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 
-    /* ── 비용 섹션 ─────────────────────────────────────── */
-    .cost-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--border); }
-    .cost-card { background: var(--surface); padding: 11px 13px; }
-    .cc-name { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); margin-bottom: 4px; }
-    .cc-amount { font-size: 16px; font-weight: 800; color: var(--text); line-height: 1.2; }
-    .cc-sub { font-size: 10px; color: var(--muted); margin-top: 3px; line-height: 1.4; }
-    .cc-fly-wrap { display: flex; align-items: baseline; gap: 2px; }
-    .cc-fly-wrap span { font-size: 12px; color: var(--muted); }
-    .cc-fly-wrap input { width: 62px; font-size: 16px; font-weight: 800; border: none; outline: none; color: var(--text); background: transparent; padding: 0; -moz-appearance: textfield; }
-    .cc-fly-wrap input::-webkit-inner-spin-button { display: none; }
-    .cost-total-row { display: flex; align-items: center; justify-content: space-between; padding: 9px 13px; background: var(--primary); color: #fff; }
-    .cost-total-row .ctr-label { font-size: 12px; font-weight: 600; opacity: .85; }
-    .cost-total-row .ctr-val { font-size: 16px; font-weight: 800; }
-    .cost-since { padding: 4px 13px; font-size: 10px; color: var(--muted); text-align: right; }
+    /* ── 비용 카드 행 ──────────────────────────────────── */
+    .cost-row { display: flex; flex-direction: column; gap: 6px; }
+    .cost-row-label { font-size: 11px; font-weight: 700; color: var(--muted); display: flex; align-items: center; gap: 8px; padding: 0 2px; }
+    .cost-reset-btn { font-size: 10px; padding: 2px 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); cursor: pointer; color: var(--muted); font-weight: 600; }
+    .cost-reset-btn:hover { background: var(--bg); }
+    .cost-cards-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+    .cost-sc { border-left: 3px solid var(--purple) !important; }
+    .cost-total-card { border-left-color: var(--primary) !important; }
+    .sc-cost { font-size: 15px !important; color: var(--purple) !important; display: flex; align-items: baseline; gap: 1px; }
+    .cost-total-card .sc-cost { color: var(--primary) !important; }
+    .sc-cost input { font-size: 15px; font-weight: 800; color: var(--purple); border: none; outline: none; background: transparent; width: 60px; padding: 0; -moz-appearance: textfield; }
+    .sc-cost input::-webkit-inner-spin-button, .sc-cost input::-webkit-outer-spin-button { -webkit-appearance: none; }
+    .sc-sub { font-size: 10px; color: var(--muted); margin-top: 2px; line-height: 1.4; }
 
     /* ── 서비스 설정 ────────────────────────────────────── */
     .pw-row { display: flex; gap: 6px; }
@@ -268,38 +267,35 @@
       </div>
     </div>
 
-    <!-- API 비용 -->
-    <div class="panel">
-      <div class="panel-hd">
-        <span class="ph-title">💰 API 사용 비용</span>
-        <button class="ph-btn outline" onclick="resetCosts()">초기화</button>
-      </div>
-      <div class="cost-cards">
-        <div class="cost-card">
-          <div class="cc-name">Claude API</div>
-          <div class="cc-amount" id="cost-claude">$0.0000</div>
-          <div class="cc-sub" id="cost-claude-tokens">입력 0 / 출력 0 토큰</div>
+    <!-- API 비용 카드 행 -->
+    <div class="cost-row">
+      <div class="cost-row-label">💰 API 사용 비용 <button class="cost-reset-btn" onclick="resetCosts()">초기화</button></div>
+      <div class="cost-cards-row">
+        <div class="stat-card cost-sc">
+          <span class="sc-icon">🤖</span>
+          <div class="sc-val sc-cost" id="cost-claude">$0.0000</div>
+          <div class="sc-label">Claude API</div>
+          <div class="sc-sub" id="cost-claude-tokens">입력 0 / 출력 0 토큰</div>
         </div>
-        <div class="cost-card">
-          <div class="cc-name">Voyage AI</div>
-          <div class="cc-amount" id="cost-voyage">$0.0000</div>
-          <div class="cc-sub" id="cost-voyage-tokens">0 토큰</div>
+        <div class="stat-card cost-sc">
+          <span class="sc-icon">🧭</span>
+          <div class="sc-val sc-cost" id="cost-voyage">$0.0000</div>
+          <div class="sc-label">Voyage AI</div>
+          <div class="sc-sub" id="cost-voyage-tokens">0 토큰</div>
         </div>
-        <div class="cost-card fly">
-          <div class="cc-name">Fly.io <span style="font-size:9px;opacity:.6">(직접 입력)</span></div>
-          <div class="cc-fly-wrap">
-            <span>$</span>
-            <input type="number" id="fly-cost" min="0" step="0.01" placeholder="0.00" oninput="saveFlyCost()" />
-            <span>/월</span>
-          </div>
-          <div class="cc-sub">인프라 · <a href="https://fly.io/dashboard" target="_blank" style="color:var(--primary);text-decoration:none">대시보드 →</a></div>
+        <div class="stat-card cost-sc">
+          <span class="sc-icon">☁️</span>
+          <div class="sc-val sc-cost">$<input type="number" id="fly-cost" min="0" step="0.01" placeholder="0.00" oninput="saveFlyCost()" /></div>
+          <div class="sc-label">Fly.io /월</div>
+          <div class="sc-sub"><a href="https://fly.io/dashboard" target="_blank" style="color:var(--primary);text-decoration:none">대시보드 →</a></div>
+        </div>
+        <div class="stat-card cost-sc cost-total-card">
+          <span class="sc-icon">💳</span>
+          <div class="sc-val sc-cost" id="cost-total">$0.0000</div>
+          <div class="sc-label">API 합계</div>
+          <div class="sc-sub" id="cost-since" style="font-size:9px"></div>
         </div>
       </div>
-      <div class="cost-total-row">
-        <span class="ctr-label">API 누적 합계</span>
-        <span class="ctr-val" id="cost-total">$0.0000</span>
-      </div>
-      <div class="cost-since" id="cost-since"></div>
     </div>
 
     <!-- 서비스 설정 + Google Drive (2열) -->
@@ -551,8 +547,8 @@
       document.getElementById('cost-total').textContent = '$' + d.total_cost_usd.toFixed(4);
       if (d.since) {
         const dt = new Date(d.since);
-        document.getElementById('cost-since').textContent = '집계 시작: ' +
-          dt.toLocaleDateString('ko-KR') + ' ' + dt.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+        document.getElementById('cost-since').textContent =
+          dt.toLocaleDateString('ko-KR') + ' ' + dt.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }) + ' 이후';
       }
     } catch {}
   }
