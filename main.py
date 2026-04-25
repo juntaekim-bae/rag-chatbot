@@ -13,7 +13,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
 import cost_tracker
-from config import ACCESS_PASSWORD, ADMIN_PASSWORD, CHROMA_DIR, DOCUMENTS_DIR, MODEL
+from config import ACCESS_PASSWORD, ADMIN_PASSWORD, CHROMA_DIR, DOCUMENTS_DIR, FLY_API_TOKEN, MODEL
 from document_processor import SUPPORTED_EXTENSIONS, process_document
 from rag_chat import chat_stream, image_to_question, question_cache
 from vector_store import vector_store
@@ -326,6 +326,14 @@ async def get_costs():
 async def reset_costs():
     cost_tracker.reset()
     return {"message": "비용 초기화 완료"}
+
+
+@app.get("/api/admin/fly-costs")
+async def fly_costs():
+    if not FLY_API_TOKEN:
+        return {"error": "no_token"}
+    from fly_billing import get_fly_billing
+    return await get_fly_billing(FLY_API_TOKEN)
 
 
 # ── 헬스체크 ──────────────────────────────────────────────────────────────────

@@ -285,9 +285,9 @@
         </div>
         <div class="stat-card cost-sc">
           <span class="sc-icon">☁️</span>
-          <div class="sc-val sc-cost">$<input type="number" id="fly-cost" min="0" step="0.01" placeholder="0.00" oninput="saveFlyCost()" /></div>
-          <div class="sc-label">Fly.io /월</div>
-          <div class="sc-sub"><a href="https://fly.io/dashboard" target="_blank" style="color:var(--primary);text-decoration:none">대시보드 →</a></div>
+          <div class="sc-val sc-cost" id="cost-fly">–</div>
+          <div class="sc-label">Fly.io 잔액</div>
+          <div class="sc-sub" id="cost-fly-sub"></div>
         </div>
         <div class="stat-card cost-sc cost-total-card">
           <span class="sc-icon">💳</span>
@@ -427,7 +427,7 @@
       if (data.role !== 'admin') { errEl.textContent = '관리자 비밀번호를 입력하세요.'; return; }
       _adminPw = pw;
       document.getElementById('login-screen').classList.add('hidden');
-      loadDocs(); loadDriveConfig(); loadLockStatus(); loadCosts(); loadFlyCost(); loadCacheStats();
+      loadDocs(); loadDriveConfig(); loadLockStatus(); loadCosts(); loadFlyCostApi(); loadCacheStats();
     } catch { errEl.textContent = '서버 오류.'; }
   }
   document.getElementById('login-pw').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
@@ -557,13 +557,30 @@
     await fetch(`${API}/api/admin/costs`, { method: 'DELETE' });
     toast('비용 초기화됨', 'success'); await loadCosts();
   }
-  function loadFlyCost() {
-    const v = localStorage.getItem('fly_monthly_usd') || '';
-    document.getElementById('fly-cost').value = v;
-  }
-  function saveFlyCost() {
-    const v = document.getElementById('fly-cost').value;
-    localStorage.setItem('fly_monthly_usd', v);
+  async function loadFlyCostApi() {
+    const valEl = document.getElementById('cost-fly');
+    const subEl = document.getElementById('cost-fly-sub');
+    try {
+      const d = await (await fetch(`${API}/api/admin/fly-costs`)).json();
+      if (d.error === 'no_token') {
+        valEl.textContent = '미설정';
+        subEl.innerHTML = '<a href="https://fly.io/user/personal_access_tokens" target="_blank" style="color:var(--primary);text-decoration:none">토큰 설정 →</a>';
+      } else if (d.error === 'billing_unavailable') {
+        valEl.textContent = '정보 없음';
+        subEl.textContent = d.org || '인증됨';
+      } else if (d.error) {
+        valEl.textContent = '오류';
+        subEl.textContent = String(d.error).slice(0, 40);
+      } else {
+        const cur = d.current_balance_usd;
+        valEl.textContent = cur != null ? '$' + Number(cur).toFixed(2) : '–';
+        const pend = d.pending_balance_usd;
+        subEl.textContent = (pend != null && pend !== 0 ? `대기 $${Number(pend).toFixed(2)} · ` : '') + (d.org || '');
+      }
+    } catch {
+      valEl.textContent = '오류';
+      subEl.textContent = '연결 실패';
+    }
   }
 
   // ── Drive 동기화 ─────────────────────────────────────────
@@ -787,6 +804,7 @@
   setInterval(loadActiveUsers, 15000);
   setInterval(loadCacheStats, 20000);
   setInterval(loadCosts, 20000);
+  setInterval(loadFlyCostApi, 120000);
   loadActiveUsers();
 </script>
 </body>

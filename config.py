@@ -6,6 +6,7 @@ load_dotenv()
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 VOYAGE_API_KEY = os.getenv("VOYAGE_API_KEY", "")
+FLY_API_TOKEN = os.getenv("FLY_API_TOKEN", "")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 ACCESS_PASSWORD = os.getenv("ACCESS_PASSWORD", "0000")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "20220405")
